@@ -82,3 +82,7 @@ opt-level = 3
 
 [patch.crates-io]
 async-compat = { git = "https://github.com/jplatte/async-compat", rev = "b83b197622d8b5756d3594ce73b720896b07faae" }
+
+[patch.crates-io.x25519-dalek]
+git = "https://github.com/A6GibKm/x25519-dalek"
+rev = "9f19028c34107eea87d37bcee2eb2b350ec34cfe"

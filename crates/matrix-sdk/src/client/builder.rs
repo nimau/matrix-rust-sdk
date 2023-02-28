@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "experimental-oidc")]
+use std::collections::HashMap;
 use std::{fmt, sync::Arc};
 
 use matrix_sdk_base::{store::StoreConfig, BaseClient};
@@ -392,7 +394,7 @@ impl ClientBuilder {
         };
 
         let homeserver = RwLock::new(Url::parse(&homeserver)?);
-        let authentication_issuer = authentication_issuer.map(RwLock::new);
+        let authentication_issuer = RwLock::new(authentication_issuer);
         #[cfg(feature = "experimental-sliding-sync")]
         let sliding_sync_proxy = sliding_sync_proxy.map(RwLock::new);
 
@@ -422,6 +424,10 @@ impl ClientBuilder {
             handle_refresh_tokens: self.handle_refresh_tokens,
             refresh_token_lock: Mutex::new(Ok(())),
             unknown_token_error_sender,
+            #[cfg(feature = "experimental-oidc")]
+            oidc_data: OnceCell::new(),
+            #[cfg(feature = "experimental-oidc")]
+            oidc_validation_data: Mutex::new(HashMap::new()),
         });
 
         debug!("Done building the Client");
