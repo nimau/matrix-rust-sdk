@@ -72,6 +72,8 @@ use url::Url;
 
 #[cfg(feature = "e2e-encryption")]
 use crate::encryption::Encryption;
+#[cfg(feature = "experimental-oidc")]
+use crate::oidc::{Oidc, OidcData};
 use crate::{
     config::RequestConfig,
     error::{HttpError, HttpResult},
@@ -139,12 +141,12 @@ pub(crate) struct ClientInner {
     /// The URL of the homeserver to connect to.
     homeserver: RwLock<Url>,
     /// The OIDC Provider that is trusted by the homeserver.
-    authentication_issuer: Option<RwLock<String>>,
+    pub(crate) authentication_issuer: RwLock<Option<String>>,
     /// The sliding sync proxy that is trusted by the homeserver.
     #[cfg(feature = "experimental-sliding-sync")]
     sliding_sync_proxy: Option<RwLock<Url>>,
     /// The underlying HTTP client.
-    http_client: HttpClient,
+    pub(crate) http_client: HttpClient,
     /// User session data.
     base_client: BaseClient,
     /// The Matrix versions the server supports (well-known ones only)
@@ -186,6 +188,9 @@ pub(crate) struct ClientInner {
     /// Client API UnknownToken error publisher. Allows the subscriber logout
     /// the user when any request fails because of an invalid access token
     pub(crate) unknown_token_error_sender: broadcast::Sender<UnknownToken>,
+    /// The OpenID Connect data.
+    #[cfg(feature = "experimental-oidc")]
+    pub(crate) oidc_data: OnceCell<OidcData>,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -330,8 +335,7 @@ impl Client {
 
     /// The OIDC Provider that is trusted by the homeserver.
     pub async fn authentication_issuer(&self) -> Option<String> {
-        let server = self.inner.authentication_issuer.as_ref()?;
-        Some(server.read().await.clone())
+        self.inner.authentication_issuer.read().await.clone()
     }
 
     /// The sliding sync proxy that is trusted by the homeserver.
@@ -555,6 +559,12 @@ impl Client {
     /// Get the media manager of the client.
     pub fn media(&self) -> Media {
         Media::new(self.clone())
+    }
+
+    /// Access the OpenID Connect API of the client.
+    #[cfg(feature = "experimental-oidc")]
+    pub fn oidc(&self) -> Oidc {
+        Oidc::new(self.clone())
     }
 
     /// Register a handler for a specific event type.

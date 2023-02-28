@@ -25,6 +25,8 @@ use std::{
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use bytesize::ByteSize;
+#[cfg(feature = "experimental-oidc")]
+use futures_core::future::BoxFuture;
 use matrix_sdk_common::AsyncTraitDeps;
 use ruma::{
     api::{
@@ -101,7 +103,7 @@ pub trait HttpSend: AsyncTraitDeps {
     ) -> Result<http::Response<Bytes>, HttpError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct HttpClient {
     pub(crate) inner: Arc<dyn HttpSend>,
     pub(crate) request_config: RequestConfig,
@@ -351,6 +353,29 @@ impl HttpClient {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(feature = "experimental-oidc")]
+impl tower::Service<http::Request<Bytes>> for HttpClient {
+    type Response = http::Response<Bytes>;
+    type Error = tower::BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: http::Request<Bytes>) -> Self::Future {
+        let inner = self.inner.clone();
+
+        let fut = async move {
+            inner.send_request(req, DEFAULT_REQUEST_TIMEOUT).await.map_err(Into::into)
+        };
+        Box::pin(fut)
     }
 }
 

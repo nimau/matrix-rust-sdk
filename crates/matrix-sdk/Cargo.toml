@@ -47,6 +47,13 @@ image-proc = ["dep:image"]
 image-rayon = ["image-proc", "image?/jpeg_rayon"]
 
 experimental-timeline = ["ruma/unstable-msc2677", "dep:chrono"]
+experimental-oidc = [
+    "dep:mas-oidc-client",
+    "dep:tower",
+    "ruma/unstable-msc2967",
+    "dep:rand",
+    "dep:chrono",
+]
 
 experimental-sliding-sync = [
     "matrix-sdk-base/experimental-sliding-sync",
@@ -122,6 +129,11 @@ features = [
     "dds",
     "farbfeld",
 ]
+optional = true
+
+[dependencies.mas-oidc-client]
+git = "https://github.com/matrix-org/matrix-authentication-service"
+rev = "34f0ec4d89c711d34460274d2f2f26cac1a8f1a0"
 optional = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

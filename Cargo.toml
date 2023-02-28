@@ -77,3 +77,7 @@ incremental = false
 # Compile all non-workspace crate in the dependency tree with optimizations
 [profile.reldbg.package."*"]
 opt-level = 3
+
+[patch.crates-io.x25519-dalek]
+git = "https://github.com/A6GibKm/x25519-dalek"
+rev = "9f19028c34107eea87d37bcee2eb2b350ec34cfe"

@@ -184,7 +184,7 @@ async fn login_error() {
         .await;
 
     if let Err(err) = client.login_username("example", "wordpass").send().await {
-        if let Some(RumaApiError::ClientApi(client_api::Error { status_code, body })) =
+        if let Some(RumaApiError::ClientApi(client_api::Error { status_code, body, .. })) =
             err.as_ruma_api_error()
         {
             assert_eq!(*status_code, http::StatusCode::from_u16(403).unwrap());
@@ -228,7 +228,7 @@ async fn register_error() {
     });
 
     if let Err(err) = client.register(user).await {
-        if let Some(client_api::Error { status_code, body }) = err.as_client_api_error() {
+        if let Some(client_api::Error { status_code, body, .. }) = err.as_client_api_error() {
             assert_eq!(*status_code, http::StatusCode::from_u16(403).unwrap());
             if let client_api::error::ErrorBody::Standard { kind, message } = body {
                 if *kind != client_api::error::ErrorKind::Forbidden {
