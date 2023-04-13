@@ -108,6 +108,11 @@ pub enum HttpError {
     /// An error occurred while refreshing the access token.
     #[error(transparent)]
     RefreshToken(#[from] RefreshTokenError),
+
+    /// And error occurred logging out via an OpenID Connect issuer.
+    #[cfg(feature = "experimental-oidc")]
+    #[error("The logout request failed.")]
+    OidcLogout,
 }
 
 #[rustfmt::skip] // stop rustfmt breaking the `<code>` in docs across multiple lines
@@ -421,4 +426,9 @@ pub enum RefreshTokenError {
     /// not be forwarded.
     #[error("the access token could not be refreshed")]
     UnableToRefreshToken,
+
+    /// Token refresh failed because the issuer rejected it. The client
+    /// should be signed out and re-authenticated to create a fresh session.
+    #[error("token refresh for the access token has been rejected")]
+    TokenRefreshDenied,
 }

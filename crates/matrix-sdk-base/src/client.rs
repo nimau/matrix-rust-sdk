@@ -203,6 +203,8 @@ impl BaseClient {
         let tokens = SessionTokens {
             access_token: response.access_token.clone(),
             refresh_token: response.refresh_token.clone(),
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc: false,
         };
         self.set_session_tokens(tokens);
 

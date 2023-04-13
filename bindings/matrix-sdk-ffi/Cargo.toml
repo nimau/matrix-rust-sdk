@@ -38,6 +38,7 @@ opentelemetry = { version = "0.18.0", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.11.0", features = ["tokio", "reqwest-client", "http-proto"] }
 ruma = { workspace = true, features = ["unstable-sanitize", "unstable-unspecified"] }
 sanitize-filename-reader-friendly = "2.2.1"
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -63,6 +64,7 @@ path = "../../crates/matrix-sdk"
 default-features = false
 features = [
     "anyhow",
+    "experimental-oidc",
     "experimental-sliding-sync",
     "e2e-encryption",
     "markdown",
@@ -76,6 +78,7 @@ path = "../../crates/matrix-sdk"
 default-features = false
 features = [
     "anyhow",
+    "experimental-oidc",
     "experimental-sliding-sync",
     "e2e-encryption",
     "markdown",

@@ -4,6 +4,10 @@ use anyhow::{anyhow, Context};
 use eyeball::shared::Observable as SharedObservable;
 use matrix_sdk::{
     media::{MediaFileHandle as SdkMediaFileHandle, MediaFormat, MediaRequest, MediaThumbnailSize},
+    oidc::types::{
+        client_credentials::ClientCredentials,
+        registration::{ClientMetadata, ClientMetadataVerificationError, VerifiedClientMetadata},
+    },
     room::Room as SdkRoom,
     ruma::{
         api::client::{
@@ -24,12 +28,13 @@ use matrix_sdk::{
         serde::Raw,
         EventEncryptionAlgorithm, TransactionId, UInt, UserId,
     },
-    Client as MatrixClient, Error, LoopCtrl,
+    Client as MatrixClient, Error, LoopCtrl, SessionChange,
 };
 use ruma::{
     push::{HttpPusherData as RumaHttpPusherData, PushFormat as RumaPushFormat},
     RoomId,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, error, warn};
@@ -99,6 +104,7 @@ impl From<PushFormat> for RumaPushFormat {
 
 pub trait ClientDelegate: Sync + Send {
     fn did_receive_auth_error(&self, is_soft_logout: bool);
+    fn did_refresh_tokens(&self);
 }
 
 pub trait NotificationDelegate: Sync + Send {
@@ -146,12 +152,12 @@ impl Client {
             sliding_sync_reset_broadcast_tx: Default::default(),
         };
 
-        let mut unknown_token_error_receiver = client.inner.subscribe_to_unknown_token_errors();
+        let mut session_change_receiver = client.inner.subscribe_to_session_changes();
         let client_clone = client.clone();
         RUNTIME.spawn(async move {
             loop {
-                match unknown_token_error_receiver.recv().await {
-                    Ok(unknown_token) => client_clone.process_unknown_token_error(unknown_token),
+                match session_change_receiver.recv().await {
+                    Ok(session_change) => client_clone.process_session_change(session_change),
                     Err(receive_error) => {
                         if let RecvError::Closed = receive_error {
                             break;
@@ -218,6 +224,7 @@ impl Client {
         let Session {
             access_token,
             refresh_token,
+            oidc_data,
             user_id,
             device_id,
             homeserver_url: _,
@@ -225,14 +232,26 @@ impl Client {
         } = session;
 
         *self.sliding_sync_proxy.write().unwrap() = sliding_sync_proxy;
+        let authenticates_with_oidc = oidc_data.is_some();
 
         let session = matrix_sdk::Session {
             access_token,
             refresh_token,
+            authenticates_with_oidc,
             user_id: user_id.try_into()?,
             device_id: device_id.into(),
         };
-        Ok(self.restore_session_inner(session)?)
+        self.restore_session_inner(session)?;
+
+        if authenticates_with_oidc {
+            let session_data =
+                serde_json::from_str::<OidcUnvalidatedSessionData>(&oidc_data.unwrap())?
+                    .validate()
+                    .expect("OIDC metadata validation failed.");
+            self.restore_oidc(session_data);
+        }
+
+        Ok(())
     }
 }
 
@@ -243,6 +262,20 @@ impl Client {
             self.inner.restore_session(session).await?;
             Ok(())
         })
+    }
+
+    /// Restores OIDC from raw OIDC data.
+    pub(crate) fn restore_oidc(&self, session_data: OidcSessionData) {
+        RUNTIME.block_on(async move {
+            self.inner
+                .oidc()
+                .set_registered_client_data(
+                    session_data.client_metadata,
+                    ClientCredentials::None { client_id: session_data.client_id },
+                    session_data.issuer,
+                )
+                .await;
+        });
     }
 
     pub(crate) async fn async_homeserver(&self) -> String {
@@ -282,6 +315,25 @@ impl Client {
         RUNTIME
             .block_on(async move { self.inner.whoami().await.map_err(|e| anyhow!(e.to_string())) })
     }
+
+    /// Gets data about the OIDC registration used by this client.
+    pub(crate) async fn oidc_data(&self) -> anyhow::Result<OidcSessionData> {
+        let issuer = self.inner.oidc().issuer().await;
+        let client_id = self
+            .inner
+            .oidc()
+            .client_credentials()
+            .context("OIDC client credentials are missing.")?
+            .client_id()
+            .to_owned();
+        let client_metadata = self
+            .inner
+            .oidc()
+            .client_metadata()
+            .context("OIDC client metadata is missing.")?
+            .clone();
+        Ok(OidcSessionData { issuer, client_id, client_metadata })
+    }
 }
 
 #[uniffi::export]
@@ -292,14 +344,27 @@ impl Client {
 
     pub fn session(&self) -> Result<Session, ClientError> {
         RUNTIME.block_on(async move {
-            let matrix_sdk::Session { access_token, refresh_token, user_id, device_id } =
-                self.inner.session().context("Missing session")?;
+            let matrix_sdk::Session {
+                access_token,
+                refresh_token,
+                authenticates_with_oidc,
+                user_id,
+                device_id,
+            } = self.inner.session().context("Missing session")?;
             let homeserver_url = self.inner.homeserver().await.into();
             let sliding_sync_proxy = self.sliding_sync_proxy.read().unwrap().clone();
+
+            let oidc_data = if authenticates_with_oidc {
+                let data = self.oidc_data().await?;
+                serde_json::to_string(&data).ok()
+            } else {
+                None
+            };
 
             Ok(Session {
                 access_token,
                 refresh_token,
+                oidc_data,
                 user_id: user_id.to_string(),
                 device_id: device_id.to_string(),
                 homeserver_url,
@@ -644,9 +709,16 @@ impl Client {
         }
     }
 
-    fn process_unknown_token_error(&self, unknown_token: matrix_sdk::UnknownToken) {
+    fn process_session_change(&self, session_change: SessionChange) {
         if let Some(delegate) = &*self.delegate.read().unwrap() {
-            delegate.did_receive_auth_error(unknown_token.soft_logout);
+            match session_change {
+                SessionChange::UnknownToken { soft_logout } => {
+                    delegate.did_receive_auth_error(soft_logout);
+                }
+                SessionChange::TokensRefreshed => {
+                    delegate.did_refresh_tokens();
+                }
+            }
         }
     }
 }
@@ -760,8 +832,41 @@ pub struct Session {
     pub device_id: String,
 
     // FFI-only fields (for now)
+    /// The URL for the homeserver used for this session.
     pub homeserver_url: String,
+    /// The URL for the sliding sync proxy used for this session.
     pub sliding_sync_proxy: Option<String>,
+    /// Data about the client registration used if this session was
+    /// authenticated using OpenID Connect.
+    pub oidc_data: Option<String>,
+}
+
+/// Represents a client registration against an OpenID Connect authentication
+/// issuer.
+#[derive(Serialize)]
+pub(crate) struct OidcSessionData {
+    issuer: Option<String>,
+    client_id: String,
+    client_metadata: VerifiedClientMetadata,
+}
+
+/// Represents an unverified client registration against an OpenID Connect
+/// authentication issuer. Call `validate` on this to use it for restoration.
+#[derive(Deserialize)]
+pub(crate) struct OidcUnvalidatedSessionData {
+    issuer: Option<String>,
+    client_id: String,
+    client_metadata: ClientMetadata,
+}
+
+impl OidcUnvalidatedSessionData {
+    fn validate(self) -> Result<OidcSessionData, ClientMetadataVerificationError> {
+        Ok(OidcSessionData {
+            issuer: self.issuer,
+            client_id: self.client_id,
+            client_metadata: self.client_metadata.validate()?,
+        })
+    }
 }
 
 #[uniffi::export]

@@ -81,6 +81,7 @@ pub struct ClientBuilder {
     store_config: BuilderStoreConfig,
     request_config: RequestConfig,
     respect_login_well_known: bool,
+    insecure_http_discovery: bool,
     appservice_mode: bool,
     server_versions: Option<Box<[MatrixVersion]>>,
     handle_refresh_tokens: bool,
@@ -94,6 +95,7 @@ impl ClientBuilder {
             store_config: BuilderStoreConfig::Custom(StoreConfig::default()),
             request_config: Default::default(),
             respect_login_well_known: true,
+            insecure_http_discovery: false,
             appservice_mode: false,
             server_versions: None,
             handle_refresh_tokens: false,
@@ -182,6 +184,16 @@ impl ClientBuilder {
     /// present in the login response, if any.
     pub fn respect_login_well_known(mut self, value: bool) -> Self {
         self.respect_login_well_known = value;
+        self
+    }
+
+    /// Use http for well-known discovery when a server name is used to discover
+    /// the homeserver details.
+    ///
+    /// This method has no effect when
+    /// [`homeserver_url()`][Self::homeserver_url] is used.
+    pub fn insecure_http_discovery(mut self, value: bool) -> Self {
+        self.insecure_http_discovery = value;
         self
     }
 
@@ -362,7 +374,7 @@ impl ClientBuilder {
             HomeserverConfig::ServerName(server_name) => {
                 debug!("Trying to discover the homeserver");
 
-                let homeserver = homeserver_from_name(&server_name);
+                let homeserver = homeserver_from_name(&server_name, self.insecure_http_discovery);
                 let well_known = http_client
                     .send(
                         discover_homeserver::Request::new(),
@@ -398,7 +410,7 @@ impl ClientBuilder {
         #[cfg(feature = "experimental-sliding-sync")]
         let sliding_sync_proxy = sliding_sync_proxy.map(RwLock::new);
 
-        let (unknown_token_error_sender, _) = broadcast::channel(1);
+        let (session_change_sender, _) = broadcast::channel(1);
 
         let inner = Arc::new(ClientInner {
             homeserver,
@@ -423,7 +435,7 @@ impl ClientBuilder {
             sync_beat: event_listener::Event::new(),
             handle_refresh_tokens: self.handle_refresh_tokens,
             refresh_token_lock: Mutex::new(Ok(())),
-            unknown_token_error_sender,
+            session_change_sender,
             #[cfg(feature = "experimental-oidc")]
             oidc_data: OnceCell::new(),
             #[cfg(feature = "experimental-oidc")]
@@ -436,9 +448,10 @@ impl ClientBuilder {
     }
 }
 
-fn homeserver_from_name(server_name: &ServerName) -> String {
+fn homeserver_from_name(server_name: &ServerName, use_http: bool) -> String {
     #[cfg(not(test))]
-    return format!("https://{server_name}");
+    let scheme = if use_http { "http" } else { "https" };
+    return format!("{scheme}://{server_name}");
 
     // Wiremock only knows how to test http endpoints:
     // https://github.com/LukeMathWalker/wiremock-rs/issues/58

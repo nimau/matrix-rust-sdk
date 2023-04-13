@@ -47,24 +47,60 @@ pub struct Session {
     /// [refreshing the access token]: https://spec.matrix.org/v1.3/client-server-api/#refreshing-access-tokens
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
+    /// The session is authenticated against an OIDC issuer.
+    #[cfg(feature = "experimental-oidc")]
+    #[serde(default = "authenticates_with_oidc_default")]
+    pub authenticates_with_oidc: bool,
     /// The user the access token was issued for.
     pub user_id: OwnedUserId,
     /// The ID of the client device.
     pub device_id: OwnedDeviceId,
 }
 
+#[cfg(feature = "experimental-oidc")]
+fn authenticates_with_oidc_default() -> bool {
+    false
+}
+
 impl Session {
     /// Creates a `Session` from a `SessionMeta` and `SessionTokens`.
     pub fn from_parts(meta: SessionMeta, tokens: SessionTokens) -> Self {
         let SessionMeta { user_id, device_id } = meta;
-        let SessionTokens { access_token, refresh_token } = tokens;
-        Self { access_token, refresh_token, user_id, device_id }
+        let SessionTokens {
+            access_token,
+            refresh_token,
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc,
+        } = tokens;
+        Self {
+            access_token,
+            refresh_token,
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc,
+            user_id,
+            device_id,
+        }
     }
 
     /// Split this `Session` between `SessionMeta` and `SessionTokens`.
     pub fn into_parts(self) -> (SessionMeta, SessionTokens) {
-        let Self { access_token, refresh_token, user_id, device_id } = self;
-        (SessionMeta { user_id, device_id }, SessionTokens { access_token, refresh_token })
+        let Self {
+            access_token,
+            refresh_token,
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc,
+            user_id,
+            device_id,
+        } = self;
+        (
+            SessionMeta { user_id, device_id },
+            SessionTokens {
+                access_token,
+                refresh_token,
+                #[cfg(feature = "experimental-oidc")]
+                authenticates_with_oidc,
+            },
+        )
     }
 }
 
@@ -83,6 +119,8 @@ impl From<ruma::api::client::session::login::v3::Response> for Session {
         Self {
             access_token: response.access_token,
             refresh_token: response.refresh_token,
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc: false,
             user_id: response.user_id,
             device_id: response.device_id,
         }
@@ -109,6 +147,9 @@ pub struct SessionTokens {
     ///
     /// [refreshing the access token]: https://spec.matrix.org/v1.3/client-server-api/#refreshing-access-tokens
     pub refresh_token: Option<String>,
+    /// The session is authenticated against an OIDC issuer.
+    #[cfg(feature = "experimental-oidc")]
+    pub authenticates_with_oidc: bool,
 }
 
 impl SessionTokens {

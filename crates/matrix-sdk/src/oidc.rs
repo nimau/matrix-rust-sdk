@@ -158,6 +158,7 @@ use mas_oidc_client::{
     },
 };
 use matrix_sdk_base::SessionTokens;
+use rand::SeedableRng;
 use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -486,6 +487,8 @@ impl Oidc {
         let tokens = SessionTokens {
             access_token: response.access_token.clone(),
             refresh_token: response.refresh_token.clone(),
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc: true,
         };
         self.client.base_client().set_session_tokens(tokens);
 
@@ -554,6 +557,8 @@ impl Oidc {
         let tokens = SessionTokens {
             access_token: response.access_token.clone(),
             refresh_token: response.refresh_token.clone(),
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc: true,
         };
         self.client.base_client().set_session_tokens(tokens);
 
@@ -578,16 +583,22 @@ impl Oidc {
             None,
             self.latest_id_token().await.as_ref(),
             Utc::now(),
-            &mut rand::thread_rng(),
+            &mut rand_chacha::ChaChaRng::from_entropy(),
         )
         .await?;
 
-        let mut tokens =
-            SessionTokens { access_token: response.access_token.clone(), refresh_token: None };
+        let mut tokens = SessionTokens {
+            access_token: response.access_token.clone(),
+            refresh_token: None,
+            #[cfg(feature = "experimental-oidc")]
+            authenticates_with_oidc: true,
+        };
 
         tokens.refresh_token = Some(response.refresh_token.clone().unwrap_or(refresh_token));
 
         self.client.base_client().set_session_tokens(tokens);
+
+        _ = self.client.inner.session_change_sender.send(crate::SessionChange::TokensRefreshed);
 
         Ok(response)
     }

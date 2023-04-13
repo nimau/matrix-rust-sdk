@@ -24,6 +24,7 @@ pub struct ClientBuilder {
     passphrase: Zeroizing<Option<String>>,
     user_agent: Option<String>,
     sliding_sync_proxy: Option<String>,
+    insecure_http_discovery: bool,
     inner: MatrixClientBuilder,
 }
 
@@ -82,6 +83,12 @@ impl ClientBuilder {
         Arc::new(builder)
     }
 
+    pub fn insecure_http_discovery(self: Arc<Self>, value: bool) -> Arc<Self> {
+        let mut builder = unwrap_or_clone_arc(self);
+        builder.insecure_http_discovery = value;
+        Arc::new(builder)
+    }
+
     pub fn build(self: Arc<Self>) -> Result<Arc<Client>, ClientError> {
         Ok(self.build_inner()?)
     }
@@ -105,7 +112,9 @@ impl ClientBuilder {
             inner_builder = inner_builder.homeserver_url(homeserver_url);
         } else if let Some(server_name) = builder.server_name {
             let server_name = ServerName::parse(server_name)?;
-            inner_builder = inner_builder.server_name(&server_name);
+            inner_builder = inner_builder
+                .server_name(&server_name)
+                .insecure_http_discovery(builder.insecure_http_discovery);
         } else if let Some(username) = builder.username {
             let user = UserId::parse(username)?;
             inner_builder = inner_builder.server_name(user.server_name());
@@ -148,7 +157,8 @@ impl Default for ClientBuilder {
             passphrase: Zeroizing::new(None),
             user_agent: None,
             sliding_sync_proxy: None,
-            inner: MatrixClient::builder(),
+            insecure_http_discovery: false,
+            inner: MatrixClient::builder().handle_refresh_tokens(),
         }
     }
 }

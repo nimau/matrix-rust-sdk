@@ -2,6 +2,7 @@ namespace matrix_sdk_ffi {};
 
 callback interface ClientDelegate {
     void did_receive_auth_error(boolean is_soft_logout);
+    void did_refresh_tokens();
 };
 
 callback interface NotificationDelegate {
