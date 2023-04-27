@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "experimental-oidc")]
+use std::collections::HashMap;
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug},
@@ -26,6 +28,8 @@ use dashmap::DashMap;
 use eyeball::{unique::Observable, Subscriber};
 use futures_core::Stream;
 use futures_util::StreamExt;
+#[cfg(feature = "experimental-oidc")]
+use mas_oidc_client::requests::authorization_code::AuthorizationValidationData;
 use matrix_sdk_base::{
     store::DynStateStore, BaseClient, RoomState, SendOutsideWasm, Session, SessionMeta,
     SessionTokens, SyncOutsideWasm,
@@ -191,6 +195,9 @@ pub(crate) struct ClientInner {
     /// The OpenID Connect data.
     #[cfg(feature = "experimental-oidc")]
     pub(crate) oidc_data: OnceCell<OidcData>,
+    /// The data needed to validate an OpenID Connect authorization request.
+    #[cfg(feature = "experimental-oidc")]
+    pub(crate) oidc_validation_data: Mutex<HashMap<String, AuthorizationValidationData>>,
 }
 
 #[cfg(not(tarpaulin_include))]

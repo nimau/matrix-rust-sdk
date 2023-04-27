@@ -26,17 +26,14 @@ use http::{Method, StatusCode};
 use hyper::{server::conn::AddrIncoming, service::service_fn, Body, Server};
 use matrix_sdk::{
     config::SyncSettings,
-    oidc::{
-        types::{
-            client_credentials::ClientCredentials,
-            errors::ClientError,
-            iana::oauth::OAuthClientAuthenticationMethod,
-            oidc::ApplicationType,
-            registration::{ClientMetadata, Localized, VerifiedClientMetadata},
-            requests::GrantType,
-            scope::{Scope, ScopeToken},
-        },
-        OidcError,
+    oidc::types::{
+        client_credentials::ClientCredentials,
+        errors::ClientError,
+        iana::oauth::OAuthClientAuthenticationMethod,
+        oidc::ApplicationType,
+        registration::{ClientMetadata, Localized, VerifiedClientMetadata},
+        requests::GrantType,
+        scope::{Scope, ScopeToken},
     },
     room::Room,
     ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent},
@@ -212,15 +209,25 @@ impl OidcCli {
             // the redirect when the custom URI scheme is opened.
             let (redirect_uri, data_rx, signal_tx) = spawn_local_server().await?;
 
+            let authorization_data = self
+                .client
+                .oidc()
+                .login()
+                .url_for_login_with_authorization_code(&redirect_uri)
+                .await?;
+
+            let authorization_response =
+                use_auth_url(authorization_data.url, authorization_data.state, data_rx, signal_tx)
+                    .await?;
+
             let res = self
                 .client
                 .oidc()
                 .login()
-                .login_with_authorization_code(&redirect_uri, move |url, state| async move {
-                    use_auth_url(url, state, data_rx, signal_tx)
-                        .await
-                        .map_err(|e| OidcError::UnknownError(e.into()))
-                })
+                .finish_login_with_authorization_code(
+                    authorization_response.code,
+                    authorization_response.state,
+                )
                 .await;
 
             match res {
@@ -403,14 +410,16 @@ impl OidcCli {
             .map(|s| ScopeToken::from_str(s).map_err(|_| anyhow!("invalid scope {s}")))
             .collect::<Result<Scope, _>>()?;
 
-        oidc.authorize_scope_with_authorization_code(
-            &scope,
-            &redirect_uri,
-            move |url, state| async move {
-                use_auth_url(url, state, data_rx, signal_tx)
-                    .await
-                    .map_err(|e| OidcError::UnknownError(e.into()))
-            },
+        let authorization_data =
+            oidc.url_for_scope_with_authorization_code(&scope, &redirect_uri).await?;
+
+        let authorization_response =
+            use_auth_url(authorization_data.url, authorization_data.state, data_rx, signal_tx)
+                .await?;
+
+        oidc.finish_authorization_with_authorization_code(
+            authorization_response.code,
+            authorization_response.state,
         )
         .await?;
 
@@ -564,7 +573,7 @@ async fn use_auth_url(
     state: String,
     data_rx: oneshot::Receiver<String>,
     signal_tx: oneshot::Sender<()>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<AuthResponse> {
     println!("\nPlease authenticate yourself at: {url}\n");
     println!("Then proceed to the authorization.\n");
 
@@ -590,7 +599,7 @@ async fn use_auth_url(
     }
 
     match response {
-        Ok(code) => Ok(code),
+        Ok(code) => Ok(AuthResponse { code, state }),
         Err(err) => Err(anyhow!("{}: {}", err.error, err.error_description)),
     }
 }

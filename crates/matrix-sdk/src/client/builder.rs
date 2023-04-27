@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "experimental-oidc")]
+use std::collections::HashMap;
 use std::{fmt, sync::Arc};
 
 use matrix_sdk_base::{store::StoreConfig, BaseClient};
@@ -428,6 +430,8 @@ impl ClientBuilder {
             unknown_token_error_sender,
             #[cfg(feature = "experimental-oidc")]
             oidc_data: OnceCell::new(),
+            #[cfg(feature = "experimental-oidc")]
+            oidc_validation_data: Mutex::new(HashMap::new()),
         });
 
         debug!("Done building the Client");
