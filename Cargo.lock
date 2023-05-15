@@ -2608,6 +2608,7 @@ dependencies = [
  "anyhow",
  "anymap2",
  "assert_matches",
+ "async-std",
  "async-stream",
  "async-trait",
  "backoff",

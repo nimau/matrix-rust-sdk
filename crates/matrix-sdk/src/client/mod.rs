@@ -164,6 +164,8 @@ pub(crate) struct ClientInner {
     pub(crate) event_handlers: EventHandlerStore,
     /// Notification handlers. See `register_notification_handler`.
     notification_handlers: RwLock<Vec<NotificationHandlerFn>>,
+    /// Temporary hack.
+    pub(crate) prev_batch_observables: DashMap<OwnedRoomId, Observable<Option<String>>>,
     pub(crate) sync_gap_broadcast_txs: StdMutex<BTreeMap<OwnedRoomId, Observable<()>>>,
     /// Whether the client should operate in application service style mode.
     /// This is low-level functionality. For an high-level API check the

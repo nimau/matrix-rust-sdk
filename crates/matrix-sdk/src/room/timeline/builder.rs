@@ -14,13 +14,14 @@
 
 use std::sync::Arc;
 
+use async_std::sync::{Condvar, Mutex};
+use eyeball::unique::Observable;
 use imbl::Vector;
 use matrix_sdk_base::deserialized_responses::{EncryptionInfo, SyncTimelineEvent};
 use ruma::{
     events::receipt::{ReceiptThread, ReceiptType, SyncReceiptEvent},
     push::Action,
 };
-use tokio::sync::Mutex;
 use tracing::error;
 
 #[cfg(feature = "e2e-encryption")]
@@ -121,6 +122,29 @@ impl TimelineBuilder {
         let inner = Arc::new(inner);
         let room = inner.room();
 
+        let mut subscriber = Observable::subscribe(
+            &*room
+                .client
+                .inner
+                .prev_batch_observables
+                .entry(room.room_id().to_owned())
+                .or_insert(Observable::new(prev_token.clone())),
+        );
+
+        let start_token = Arc::new(Mutex::new(prev_token));
+        let start_token_condvar = Arc::new(Condvar::new());
+
+        tokio::spawn({
+            let start_token = start_token.clone();
+            let start_token_condvar = start_token_condvar.clone();
+            async move {
+                while let Some(prev_batch) = subscriber.next().await {
+                    *start_token.lock().await = prev_batch;
+                    start_token_condvar.notify_all();
+                }
+            }
+        });
+
         let timeline_event_handle = room.add_event_handler({
             let inner = inner.clone();
             move |event, encryption_info: Option<EncryptionInfo>, push_actions: Vec<Action>| {
@@ -179,7 +203,8 @@ impl TimelineBuilder {
         let client = room.client.clone();
         let timeline = Timeline {
             inner,
-            start_token: Mutex::new(prev_token),
+            start_token,
+            start_token_condvar,
             _end_token: Mutex::new(None),
             event_handler_handles: Arc::new(TimelineEventHandlerHandles { client, handles }),
         };

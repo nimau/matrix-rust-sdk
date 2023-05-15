@@ -47,7 +47,12 @@ appservice = ["ruma/appservice-api-s"]
 image-proc = ["dep:image"]
 image-rayon = ["image-proc", "image?/jpeg_rayon"]
 
-experimental-timeline = ["ruma/unstable-msc2677", "ruma/unstable-sanitize", "dep:chrono"]
+experimental-timeline = [
+    "dep:async-std",
+    "dep:chrono",
+    "ruma/unstable-msc2677",
+    "ruma/unstable-sanitize",
+]
 
 experimental-sliding-sync = [
     "matrix-sdk-base/experimental-sliding-sync",
@@ -67,6 +72,7 @@ docsrs = [
 [dependencies]
 anyhow = { workspace = true, optional = true }
 anymap2 = "0.13.0"
+async-std = { version = "1.12.0", features = ["unstable"], optional = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 bytes = "1.1.0"
