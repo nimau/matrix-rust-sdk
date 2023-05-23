@@ -608,6 +608,21 @@ impl Room {
         })
     }
 
+    /// Sets a new name for the room.
+    pub fn set_name(&self, name: Option<String>) -> Result<(), ClientError> {
+        let room = match &self.room {
+            SdkRoom::Joined(j) => j.clone(),
+            _ => {
+                return Err(anyhow!("Can't set a name in a room that isn't in joined state").into())
+            }
+        };
+
+        RUNTIME.block_on(async move {
+            room.set_name(name).await?;
+            Ok(())
+        })
+    }
+
     /// Upload and set the room's avatar.
     ///
     /// This will upload the data produced by the reader to the homeserver's
