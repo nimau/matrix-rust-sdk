@@ -129,6 +129,7 @@ pub enum NotificationSettingsError {
 impl From<SdkNotificationSettingsError> for NotificationSettingsError {
     fn from(value: SdkNotificationSettingsError) -> Self {
         match value {
+            SdkNotificationSettingsError::RoomNotFound => Self::RoomNotFound,
             SdkNotificationSettingsError::RuleNotFound => Self::RuleNotFound,
             SdkNotificationSettingsError::UnableToAddPushRule => Self::UnableToAddPushRule,
             SdkNotificationSettingsError::UnableToRemovePushRule => Self::UnableToRemovePushRule,

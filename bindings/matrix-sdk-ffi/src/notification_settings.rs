@@ -182,6 +182,10 @@ impl NotificationSettings {
     }
 
     /// Set whether `@room` mentions are enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - `true` to enable room mention, `false` otherwise
     pub async fn set_room_mention_enabled(
         &self,
         enabled: bool,
@@ -200,6 +204,10 @@ impl NotificationSettings {
     }
 
     /// Set whether user mentions are enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - `true` to enable user mention, `false` otherwise
     pub async fn set_user_mention_enabled(
         &self,
         enabled: bool,
@@ -207,6 +215,21 @@ impl NotificationSettings {
         let mut ruleset = self.push_rules.read().await.clone();
         let notification_settings = self.sdk_client.notification_settings();
         notification_settings.set_user_mention_enabled(enabled, &mut ruleset).await?;
+        *self.push_rules.write().await = ruleset;
+        Ok(())
+    }
+
+    /// Unmute a room.
+    ///     
+    /// # Arguments
+    ///
+    /// * `room_id` - A room ID
+    pub async fn unmute_room(&self, room_id: String) -> Result<(), NotificationSettingsError> {
+        let mut ruleset = self.push_rules.read().await.clone();
+        let notification_settings = self.sdk_client.notification_settings();
+        let parsed_room_idom_id = RoomId::parse(&room_id)
+            .map_err(|_e| NotificationSettingsError::InvalidRoomId(room_id))?;
+        notification_settings.unmute_room(&parsed_room_idom_id, &mut ruleset).await?;
         *self.push_rules.write().await = ruleset;
         Ok(())
     }

@@ -433,6 +433,9 @@ pub enum NotificationSettingsError {
     /// Unable to remove push rule.
     #[error("Unable to remove push rule")]
     UnableToRemovePushRule,
+    /// Room not found
+    #[error("Room not found")]
+    RoomNotFound,
     /// Rule not found
     #[error("Rule not found")]
     RuleNotFound,
