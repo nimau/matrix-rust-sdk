@@ -559,6 +559,57 @@ impl NotificationSettings {
 
         Ok(())
     }
+
+    /// Unmute a `Room`.
+    ///
+    /// # Arguments
+    ///
+    /// * `room_id` - A `RoomId`
+    /// * `ruleset` - A ruleset representing the owner's account push rules, in
+    ///   which the rules will be updated.
+    pub async fn unmute_room(
+        &self,
+        room_id: &RoomId,
+        ruleset: &mut Ruleset,
+    ) -> Result<(), NotificationSettingsError> {
+        // Get the current mode
+        let room_mode = self.get_user_defined_room_notification_mode(room_id, ruleset);
+
+        if let Some(room_mode) = room_mode {
+            if room_mode != RoomNotificationMode::Mute {
+                // Already unmuted
+                return Ok(());
+            }
+        } else {
+            // This is the default mode, create a custom rule to unmute this room by setting
+            // the mode to `AllMessages`
+            return self
+                .set_room_notification_mode(room_id, RoomNotificationMode::AllMessages, ruleset)
+                .await;
+        }
+
+        // Get default mode for this room
+        let room = self.client.get_room(&room_id);
+        if room.is_none() {
+            return Err(NotificationSettingsError::RoomNotFound);
+        }
+        let room = room.unwrap();
+        let is_encrypted = room.is_encrypted().await.unwrap_or(false);
+        let members_count = room.joined_members_count();
+
+        let default_mode =
+            self.get_default_room_notification_mode(is_encrypted, members_count, ruleset)?;
+
+        // If the default mode is `Mute`, set it to `AllMessages`
+        if default_mode == RoomNotificationMode::Mute {
+            return self
+                .set_room_notification_mode(room_id, RoomNotificationMode::AllMessages, ruleset)
+                .await;
+        } else {
+            // Otherwise, delete user defined rules to use the default mode
+            return self.delete_user_defined_room_rules(room_id, ruleset).await;
+        }
+    }
 }
 
 // The http mocking library is not supported for wasm32
