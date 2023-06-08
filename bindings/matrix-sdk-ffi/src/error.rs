@@ -124,6 +124,9 @@ pub enum NotificationSettingsError {
     /// Unable to save the push rules
     #[error("Unable to save push rules")]
     UnableToSavePushRules,
+    /// Unable to update push rule
+    #[error("Unable to update push rule")]
+    UnableToUpdatePushRule,
 }
 
 impl From<SdkNotificationSettingsError> for NotificationSettingsError {
@@ -134,6 +137,7 @@ impl From<SdkNotificationSettingsError> for NotificationSettingsError {
             SdkNotificationSettingsError::UnableToAddPushRule => Self::UnableToAddPushRule,
             SdkNotificationSettingsError::UnableToRemovePushRule => Self::UnableToRemovePushRule,
             SdkNotificationSettingsError::UnableToSavePushRules => Self::UnableToSavePushRules,
+            SdkNotificationSettingsError::UnableToUpdatePushRule => Self::UnableToUpdatePushRule,
         }
     }
 }

@@ -5,7 +5,10 @@ use matrix_sdk::{
     notification_settings::RoomNotificationMode as SdkRoomNotificationMode,
     ruma::events::push_rules::PushRulesEvent, Client as MatrixClient,
 };
-use ruma::{push::Ruleset, RoomId};
+use ruma::{
+    push::{PredefinedOverrideRuleId, PredefinedUnderrideRuleId, Ruleset},
+    RoomId,
+};
 use tokio::sync::RwLock;
 
 use crate::error::NotificationSettingsError;
@@ -41,6 +44,28 @@ impl RoomNotificationSettings {
     fn new(mode: RoomNotificationMode, is_default: bool) -> Self {
         RoomNotificationSettings { mode, is_default }
     }
+}
+
+#[derive(Clone, uniffi::Enum)]
+pub enum PredefinedRuleId {
+    /// `.m.rule.call`
+    Call,
+
+    /// `.m.rule.encrypted_room_one_to_one`
+    EncryptedRoomOneToOne,
+
+    IsRoomMention,
+
+    IsUserMention,
+
+    /// `.m.rule.room_one_to_one`
+    RoomOneToOne,
+
+    /// `.m.rule.message`
+    Message,
+
+    /// `.m.rule.encrypted`
+    Encrypted,
 }
 
 #[derive(Clone, uniffi::Object)]
@@ -175,50 +200,6 @@ impl NotificationSettings {
         self.sdk_client.notification_settings().contains_keyword_rules(ruleset)
     }
 
-    /// Get whether `@room` mentions are enabled.
-    pub async fn is_room_mention_enabled(&self) -> bool {
-        let ruleset = &*self.push_rules.read().await;
-        self.sdk_client.notification_settings().is_room_mention_enabled(ruleset)
-    }
-
-    /// Set whether `@room` mentions are enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `enabled` - `true` to enable room mention, `false` otherwise
-    pub async fn set_room_mention_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<(), NotificationSettingsError> {
-        let mut ruleset = self.push_rules.read().await.clone();
-        let notification_settings = self.sdk_client.notification_settings();
-        notification_settings.set_room_mention_enabled(enabled, &mut ruleset).await?;
-        *self.push_rules.write().await = ruleset;
-        Ok(())
-    }
-
-    /// Get whether user mentions are enabled.
-    pub async fn is_user_mention_enabled(&self) -> bool {
-        let ruleset = &*self.push_rules.read().await;
-        self.sdk_client.notification_settings().is_user_mention_enabled(ruleset)
-    }
-
-    /// Set whether user mentions are enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `enabled` - `true` to enable user mention, `false` otherwise
-    pub async fn set_user_mention_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<(), NotificationSettingsError> {
-        let mut ruleset = self.push_rules.read().await.clone();
-        let notification_settings = self.sdk_client.notification_settings();
-        notification_settings.set_user_mention_enabled(enabled, &mut ruleset).await?;
-        *self.push_rules.write().await = ruleset;
-        Ok(())
-    }
-
     /// Unmute a room.
     ///     
     /// # Arguments
@@ -231,6 +212,134 @@ impl NotificationSettings {
             .map_err(|_e| NotificationSettingsError::InvalidRoomId(room_id))?;
         notification_settings.unmute_room(&parsed_room_idom_id, &mut ruleset).await?;
         *self.push_rules.write().await = ruleset;
+        Ok(())
+    }
+
+    /// Get whether a predefined rule is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_id` - A `PredefinedRuleId`
+    pub async fn is_predefined_rule_enabled(
+        &self,
+        rule_id: PredefinedRuleId,
+    ) -> Result<bool, NotificationSettingsError> {
+        let ruleset = self.push_rules.read().await.clone();
+        let notification_settings = self.sdk_client.notification_settings();
+
+        let enabled = match rule_id {
+            PredefinedRuleId::Call => notification_settings
+                .is_predefined_underride_rule_enabled(PredefinedUnderrideRuleId::Call, &ruleset),
+            PredefinedRuleId::EncryptedRoomOneToOne => notification_settings
+                .is_predefined_underride_rule_enabled(
+                    PredefinedUnderrideRuleId::EncryptedRoomOneToOne,
+                    &ruleset,
+                ),
+            PredefinedRuleId::IsRoomMention => notification_settings
+                .is_predefined_override_rule_enabled(
+                    ruma::push::PredefinedOverrideRuleId::IsRoomMention,
+                    &ruleset,
+                ),
+            PredefinedRuleId::IsUserMention => notification_settings
+                .is_predefined_override_rule_enabled(
+                    ruma::push::PredefinedOverrideRuleId::IsUserMention,
+                    &ruleset,
+                ),
+            PredefinedRuleId::RoomOneToOne => notification_settings
+                .is_predefined_underride_rule_enabled(
+                    PredefinedUnderrideRuleId::RoomOneToOne,
+                    &ruleset,
+                ),
+            PredefinedRuleId::Message => notification_settings
+                .is_predefined_underride_rule_enabled(PredefinedUnderrideRuleId::Message, &ruleset),
+            PredefinedRuleId::Encrypted => notification_settings
+                .is_predefined_underride_rule_enabled(
+                    PredefinedUnderrideRuleId::Encrypted,
+                    &ruleset,
+                ),
+        };
+        Ok(enabled?)
+    }
+
+    /// Set whether a predefined rule is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_id` - A `PredefinedRuleId`
+    /// * `enabled` - A `bool` indicating whether the rule should be activated
+    pub async fn set_predefined_rule_enabled(
+        &self,
+        rule_id: PredefinedRuleId,
+        enabled: bool,
+    ) -> Result<(), NotificationSettingsError> {
+        let mut ruleset = self.push_rules.read().await.clone();
+        let notification_settings = self.sdk_client.notification_settings();
+
+        match rule_id {
+            PredefinedRuleId::Call => {
+                notification_settings
+                    .set_predefined_underride_rule_enabled(
+                        PredefinedUnderrideRuleId::Call,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+            PredefinedRuleId::Encrypted => {
+                notification_settings
+                    .set_predefined_underride_rule_enabled(
+                        PredefinedUnderrideRuleId::Encrypted,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+            PredefinedRuleId::EncryptedRoomOneToOne => {
+                notification_settings
+                    .set_predefined_underride_rule_enabled(
+                        PredefinedUnderrideRuleId::EncryptedRoomOneToOne,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+            PredefinedRuleId::IsRoomMention => {
+                notification_settings
+                    .set_predefined_override_rule_enabled(
+                        PredefinedOverrideRuleId::IsRoomMention,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+            PredefinedRuleId::IsUserMention => {
+                notification_settings
+                    .set_predefined_override_rule_enabled(
+                        PredefinedOverrideRuleId::IsUserMention,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+            PredefinedRuleId::Message => {
+                notification_settings
+                    .set_predefined_underride_rule_enabled(
+                        PredefinedUnderrideRuleId::Message,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+            PredefinedRuleId::RoomOneToOne => {
+                notification_settings
+                    .set_predefined_underride_rule_enabled(
+                        PredefinedUnderrideRuleId::RoomOneToOne,
+                        enabled,
+                        &mut ruleset,
+                    )
+                    .await?
+            }
+        };
         Ok(())
     }
 }

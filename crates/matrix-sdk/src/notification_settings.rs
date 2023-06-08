@@ -320,7 +320,7 @@ impl NotificationSettings {
     ///
     /// * `ruleset` - A ruleset representing the owner's account push rules,
     ///   which will be updated.
-    pub fn is_user_mention_enabled(&self, ruleset: &Ruleset) -> bool {
+    fn is_user_mention_enabled(&self, ruleset: &Ruleset) -> bool {
         // Search for an enabled `Override` rule `IsUserMention` (MSC3952).
         // This is a new push rule that may not yet be present.
         if let Some(rule) = ruleset.get(RuleKind::Override, PredefinedOverrideRuleId::IsUserMention)
@@ -351,11 +351,11 @@ impl NotificationSettings {
     ///   otherwise
     /// * `ruleset` - A ruleset representing the owner's account push rules, in
     ///   which the rule will be enabled or disabled
-    pub async fn set_user_mention_enabled(
+    async fn set_user_mention_enabled(
         &self,
         enabled: bool,
         ruleset: &mut Ruleset,
-    ) -> Result<()> {
+    ) -> Result<(), NotificationSettingsError> {
         // Sets the `IsUserMention` `Override` rule (MSC3952).
         // This is a new push rule that may not yet be present.
         let request = set_pushrule_enabled::v3::Request::new(
@@ -364,12 +364,15 @@ impl NotificationSettings {
             PredefinedOverrideRuleId::IsUserMention.to_string(),
             enabled,
         );
-        self.client.send(request, None).await?;
-        _ = ruleset.set_enabled(
+        self.client
+            .send(request, None)
+            .await
+            .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
+        ruleset.set_enabled(
             RuleKind::Override,
             PredefinedOverrideRuleId::IsUserMention,
             enabled,
-        );
+        )?;
 
         // For compatibility purpose, we still need to set `ContainsUserName` and
         // `ContainsDisplayName` (deprecated rules).
@@ -381,7 +384,10 @@ impl NotificationSettings {
                 PredefinedContentRuleId::ContainsUserName.to_string(),
                 enabled,
             );
-            self.client.send(request, None).await?;
+            self.client
+                .send(request, None)
+                .await
+                .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
             _ = ruleset.set_enabled(
                 RuleKind::Content,
                 PredefinedContentRuleId::ContainsUserName,
@@ -394,7 +400,10 @@ impl NotificationSettings {
                 PredefinedOverrideRuleId::ContainsDisplayName.to_string(),
                 enabled,
             );
-            self.client.send(request, None).await?;
+            self.client
+                .send(request, None)
+                .await
+                .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
             _ = ruleset.set_enabled(
                 RuleKind::Content,
                 PredefinedOverrideRuleId::ContainsDisplayName,
@@ -410,7 +419,7 @@ impl NotificationSettings {
     /// # Arguments
     ///
     /// * `ruleset` - A ruleset representing the owner's account push rules,
-    pub fn is_room_mention_enabled(&self, ruleset: &Ruleset) -> bool {
+    fn is_room_mention_enabled(&self, ruleset: &Ruleset) -> bool {
         // Search for an enabled `Override` rule `IsRoomMention` (MSC3952).
         // This is a new push rule that may not yet be present.
         if let Some(rule) = ruleset.get(RuleKind::Override, PredefinedOverrideRuleId::IsRoomMention)
@@ -437,11 +446,11 @@ impl NotificationSettings {
     ///   otherwise
     /// * `ruleset` - A ruleset representing the owner's account push rules, in
     ///   which the rule will be enabled or disabled
-    pub async fn set_room_mention_enabled(
+    async fn set_room_mention_enabled(
         &self,
         enabled: bool,
         ruleset: &mut Ruleset,
-    ) -> Result<()> {
+    ) -> Result<(), NotificationSettingsError> {
         // Sets the `IsRoomMention` `Override` rule (MSC3952).
         // This is a new push rule that may not yet be present.
         let request = set_pushrule_enabled::v3::Request::new(
@@ -450,12 +459,16 @@ impl NotificationSettings {
             PredefinedOverrideRuleId::IsRoomMention.to_string(),
             enabled,
         );
-        self.client.send(request, None).await?;
-        _ = ruleset.set_enabled(
+        self.client
+            .send(request, None)
+            .await
+            .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
+
+        ruleset.set_enabled(
             RuleKind::Override,
             PredefinedOverrideRuleId::IsRoomMention,
             enabled,
-        );
+        )?;
 
         // For compatibility purpose, we still need to set `RoomNotif` (deprecated
         // rule).
@@ -467,7 +480,10 @@ impl NotificationSettings {
                 PredefinedOverrideRuleId::RoomNotif.to_string(),
                 enabled,
             );
-            self.client.send(request, None).await?;
+            self.client
+                .send(request, None)
+                .await
+                .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
             _ = ruleset.set_enabled(
                 RuleKind::Content,
                 PredefinedOverrideRuleId::RoomNotif,
@@ -589,7 +605,7 @@ impl NotificationSettings {
         }
 
         // Get default mode for this room
-        let room = self.client.get_room(&room_id);
+        let room = self.client.get_room(room_id);
         if room.is_none() {
             return Err(NotificationSettingsError::RoomNotFound);
         }
@@ -602,13 +618,114 @@ impl NotificationSettings {
 
         // If the default mode is `Mute`, set it to `AllMessages`
         if default_mode == RoomNotificationMode::Mute {
-            return self
-                .set_room_notification_mode(room_id, RoomNotificationMode::AllMessages, ruleset)
-                .await;
+            self.set_room_notification_mode(room_id, RoomNotificationMode::AllMessages, ruleset)
+                .await
         } else {
             // Otherwise, delete user defined rules to use the default mode
-            return self.delete_user_defined_room_rules(room_id, ruleset).await;
+            self.delete_user_defined_room_rules(room_id, ruleset).await
         }
+    }
+
+    /// Get whether an override predefined rule is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_id` - A `PredefinedOverrideRuleId`
+    /// * `ruleset` - A ruleset representing the owner's account push rules
+    pub fn is_predefined_override_rule_enabled(
+        &self,
+        rule_id: PredefinedOverrideRuleId,
+        ruleset: &Ruleset,
+    ) -> Result<bool, NotificationSettingsError> {
+        match rule_id {
+            PredefinedOverrideRuleId::IsRoomMention => Ok(self.is_room_mention_enabled(ruleset)),
+            PredefinedOverrideRuleId::IsUserMention => Ok(self.is_user_mention_enabled(ruleset)),
+            _ => match ruleset.get(RuleKind::Override, rule_id) {
+                None => Err(NotificationSettingsError::RuleNotFound),
+                Some(rule) => Ok(rule.enabled()),
+            },
+        }
+    }
+
+    /// Set whether an override predefined rule is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_id` - A `PredefinedOverrideRuleId`
+    /// * `enabled` - A `bool` indicating whether the rule should be activated
+    /// * `ruleset` - A ruleset representing the owner's account push rules, in
+    ///   which the rules will be updated.
+    pub async fn set_predefined_override_rule_enabled(
+        &self,
+        rule_id: PredefinedOverrideRuleId,
+        enabled: bool,
+        ruleset: &mut Ruleset,
+    ) -> Result<(), NotificationSettingsError> {
+        match rule_id {
+            PredefinedOverrideRuleId::IsRoomMention => {
+                self.set_room_mention_enabled(enabled, ruleset).await
+            }
+            PredefinedOverrideRuleId::IsUserMention => {
+                self.set_user_mention_enabled(enabled, ruleset).await
+            }
+            _ => {
+                let request = set_pushrule_enabled::v3::Request::new(
+                    RuleScope::Global,
+                    RuleKind::Override,
+                    rule_id.to_string(),
+                    enabled,
+                );
+                self.client
+                    .send(request, None)
+                    .await
+                    .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
+                Ok(ruleset.set_enabled(RuleKind::Override, rule_id, enabled)?)
+            }
+        }
+    }
+
+    /// Get whether an underride predefined rule is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_id` - A `PredefinedUnderrideRuleId`
+    /// * `ruleset` - A ruleset representing the owner's account push rules
+    pub fn is_predefined_underride_rule_enabled(
+        &self,
+        rule_id: PredefinedUnderrideRuleId,
+        ruleset: &Ruleset,
+    ) -> Result<bool, NotificationSettingsError> {
+        match ruleset.get(RuleKind::Underride, rule_id) {
+            None => Err(NotificationSettingsError::RuleNotFound),
+            Some(rule) => Ok(rule.enabled()),
+        }
+    }
+
+    /// Set whether an underride predefined rule is enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_id` - A `PredefinedUnderrideRuleId`
+    /// * `enabled` - A `bool` indicating whether the rule should be activated
+    /// * `ruleset` - A ruleset representing the owner's account push rules, in
+    ///   which the rules will be updated.
+    pub async fn set_predefined_underride_rule_enabled(
+        &self,
+        rule_id: PredefinedUnderrideRuleId,
+        enabled: bool,
+        ruleset: &mut Ruleset,
+    ) -> Result<(), NotificationSettingsError> {
+        let request = set_pushrule_enabled::v3::Request::new(
+            RuleScope::Global,
+            RuleKind::Underride,
+            rule_id.to_string(),
+            enabled,
+        );
+        self.client
+            .send(request, None)
+            .await
+            .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
+        Ok(ruleset.set_enabled(RuleKind::Underride, rule_id, enabled)?)
     }
 }
 

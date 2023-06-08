@@ -433,6 +433,9 @@ pub enum NotificationSettingsError {
     /// Unable to remove push rule.
     #[error("Unable to remove push rule")]
     UnableToRemovePushRule,
+    /// Unable to update push rule.
+    #[error("Unable to update push rule")]
+    UnableToUpdatePushRule,
     /// Room not found
     #[error("Room not found")]
     RoomNotFound,
@@ -446,18 +449,18 @@ pub enum NotificationSettingsError {
 
 impl From<InsertPushRuleError> for NotificationSettingsError {
     fn from(_: InsertPushRuleError) -> Self {
-        NotificationSettingsError::UnableToAddPushRule
+        Self::UnableToAddPushRule
     }
 }
 
 impl From<RemovePushRuleError> for NotificationSettingsError {
     fn from(_: RemovePushRuleError) -> Self {
-        NotificationSettingsError::UnableToRemovePushRule
+        Self::UnableToRemovePushRule
     }
 }
 
 impl From<RuleNotFoundError> for NotificationSettingsError {
     fn from(_: RuleNotFoundError) -> Self {
-        NotificationSettingsError::RuleNotFound
+        Self::RuleNotFound
     }
 }
