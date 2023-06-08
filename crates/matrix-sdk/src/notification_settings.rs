@@ -614,7 +614,7 @@ impl NotificationSettings {
         let members_count = room.joined_members_count();
 
         let default_mode =
-            self.get_default_room_notification_mode(is_encrypted, members_count, ruleset)?;
+            self.get_default_room_notification_mode(is_encrypted, members_count, ruleset);
 
         // If the default mode is `Mute`, set it to `AllMessages`
         if default_mode == RoomNotificationMode::Mute {

@@ -145,6 +145,27 @@ impl NotificationSettings {
         Ok(RoomNotificationSettings::new(mode.into(), true))
     }
 
+    /// Gets the default notification mode for a room.
+    ///
+    /// # Arguments
+    ///
+    /// * `is_encrypted` - A `bool` indicating whether the room is encrypted
+    /// * `members_count` - The members count
+    pub async fn get_default_room_notification_mode(
+        &self,
+        is_encrypted: bool,
+        members_count: u64,
+    ) -> RoomNotificationMode {
+        let ruleset = &*self.push_rules.read().await;
+        let notification_settings = self.sdk_client.notification_settings();
+        let mode = notification_settings.get_default_room_notification_mode(
+            is_encrypted,
+            members_count,
+            ruleset,
+        );
+        mode.into()
+    }
+
     /// Sets the notification mode for a room.
     ///
     /// # Arguments
