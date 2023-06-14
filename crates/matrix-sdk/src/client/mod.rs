@@ -61,6 +61,7 @@ use ruma::{
         MatrixVersion, OutgoingRequest, SendAccessToken,
     },
     assign,
+    push::Ruleset,
     serde::JsonObject,
     DeviceId, OwnedDeviceId, OwnedRoomId, OwnedServerName, RoomAliasId, RoomId, RoomOrAliasId,
     ServerName, UInt, UserId,
@@ -542,8 +543,9 @@ impl Client {
     }
 
     /// Get the notification settings of the current owner of the client.
-    pub fn notification_settings(&self) -> NotificationSettings {
-        NotificationSettings::new(self.clone())
+    pub async fn notification_settings(&self) -> NotificationSettings {
+        let ruleset = self.account().push_rules().await.unwrap_or_else(|_| Ruleset::new());
+        NotificationSettings::new(self.clone(), ruleset.clone())
     }
 
     /// Get the encryption manager of the client.

@@ -168,6 +168,6 @@ callback interface SessionVerificationControllerDelegate {
     void did_finish();
 };
 
-callback interface NotificationSettingsDelegate {
+callback interface NotificationSettingsListener {
     void notification_settings_did_change();
 };
