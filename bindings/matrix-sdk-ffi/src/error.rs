@@ -106,6 +106,9 @@ pub enum TimelineError {
 pub enum NotificationSettingsError {
     #[error("client error: {msg}")]
     Generic { msg: String },
+    /// Invalid parameter.
+    #[error("Invalid parameter `{0}`")]
+    InvalidParameter(String),
     /// Invalid room id.
     #[error("Invalid room ID `{0}`")]
     InvalidRoomId(String),
@@ -132,6 +135,9 @@ pub enum NotificationSettingsError {
 impl From<SdkNotificationSettingsError> for NotificationSettingsError {
     fn from(value: SdkNotificationSettingsError) -> Self {
         match value {
+            SdkNotificationSettingsError::InvalidParameter(parameter) => {
+                Self::InvalidParameter(parameter)
+            }
             SdkNotificationSettingsError::RoomNotFound => Self::RoomNotFound,
             SdkNotificationSettingsError::RuleNotFound => Self::RuleNotFound,
             SdkNotificationSettingsError::UnableToAddPushRule => Self::UnableToAddPushRule,

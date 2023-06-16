@@ -427,6 +427,9 @@ pub enum RefreshTokenError {
 /// Errors that can occur when manipulating push notification settings.
 #[derive(Debug, Error, Clone)]
 pub enum NotificationSettingsError {
+    /// Invalid parameter.
+    #[error("Invalid parameter `{0}`")]
+    InvalidParameter(String),
     /// Unable to add push rule.
     #[error("Unable to add push rule")]
     UnableToAddPushRule,

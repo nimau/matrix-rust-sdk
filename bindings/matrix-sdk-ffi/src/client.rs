@@ -600,11 +600,10 @@ impl Client {
     pub async fn get_notification_settings(&self) -> Arc<NotificationSettings> {
         RUNTIME.block_on(async move {
             let sdk_notification_settings = self.inner.notification_settings().await;
-            let notification_settings = Arc::new(NotificationSettings::new(
+            Arc::new(NotificationSettings::new(
                 self.inner.clone(),
                 Arc::new(sdk_notification_settings),
-            ));
-            notification_settings
+            ))
         })
     }
 }

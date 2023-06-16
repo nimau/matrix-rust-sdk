@@ -545,7 +545,7 @@ impl Client {
     /// Get the notification settings of the current owner of the client.
     pub async fn notification_settings(&self) -> NotificationSettings {
         let ruleset = self.account().push_rules().await.unwrap_or_else(|_| Ruleset::new());
-        NotificationSettings::new(self.clone(), ruleset.clone())
+        NotificationSettings::new(self.clone(), ruleset)
     }
 
     /// Get the encryption manager of the client.

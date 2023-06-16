@@ -9,9 +9,9 @@ use ruma::{
 };
 use tokio::sync::RwLock;
 
-use self::ruleset_proxy::{Command, RulesetProxy};
+use self::rules::{Command, Rules};
 
-mod ruleset_proxy;
+mod rules;
 
 use crate::{error::NotificationSettingsError, Client, Result};
 
@@ -62,7 +62,7 @@ impl NotificationSettings {
     /// * `room_id` - A `RoomId`
     async fn get_custom_rules_for_room(&self, room_id: &RoomId) -> Vec<(RuleKind, String)> {
         let ruleset = self.ruleset.read().await;
-        RulesetProxy::new(ruleset.clone()).get_custom_rules_for_room(room_id)
+        Rules::new(ruleset.clone()).get_custom_rules_for_room(room_id)
     }
 
     /// Gets the user defined push notification mode for a room.
@@ -75,7 +75,7 @@ impl NotificationSettings {
         room_id: &RoomId,
     ) -> Option<RoomNotificationMode> {
         let ruleset = self.ruleset.read().await;
-        RulesetProxy::new(ruleset.clone()).get_user_defined_room_notification_mode(room_id)
+        Rules::new(ruleset.clone()).get_user_defined_room_notification_mode(room_id)
     }
 
     /// Gets the default notification mode for a room.
@@ -90,14 +90,13 @@ impl NotificationSettings {
         members_count: u64,
     ) -> RoomNotificationMode {
         let ruleset = self.ruleset.read().await;
-        RulesetProxy::new(ruleset.clone())
-            .get_default_room_notification_mode(is_encrypted, members_count)
+        Rules::new(ruleset.clone()).get_default_room_notification_mode(is_encrypted, members_count)
     }
 
     /// Get whether the given ruleset contains some enabled keywords rules.
     pub async fn contains_keyword_rules(&self) -> bool {
         let ruleset = self.ruleset.read().await;
-        RulesetProxy::new(ruleset.clone()).contains_keyword_rules()
+        Rules::new(ruleset.clone()).contains_keyword_rules()
     }
 
     /// Get whether a rule is enabled.
@@ -112,7 +111,7 @@ impl NotificationSettings {
         rule_id: String,
     ) -> Result<bool, NotificationSettingsError> {
         let ruleset = self.ruleset.read().await;
-        RulesetProxy::new(ruleset.clone()).is_rule_enabled(kind, rule_id)
+        Rules::new(ruleset.clone()).is_enabled(kind, rule_id)
     }
 
     /// Set whether an rule is enabled.
@@ -130,14 +129,14 @@ impl NotificationSettings {
     ) -> Result<(), NotificationSettingsError> {
         let ruleset = &mut *self.ruleset.write().await;
 
-        let mut proxy = RulesetProxy::new(ruleset.clone());
-        let commands = proxy
-            .set_pushrule_enabled(RuleScope::Global, kind, rule_id, enabled)
+        let mut rules = Rules::new(ruleset.clone());
+        let commands = rules
+            .set_enabled(RuleScope::Global, kind, rule_id, enabled)
             .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
         self.execute_commands(commands)
             .await
             .map_err(|_| NotificationSettingsError::UnableToUpdatePushRule)?;
-        *ruleset = proxy.ruleset;
+        *ruleset = rules.ruleset;
 
         Ok(())
     }
@@ -252,14 +251,15 @@ impl NotificationSettings {
     ) -> Result<(), NotificationSettingsError> {
         let mut ruleset = self.ruleset.write().await;
 
-        let mut proxy = RulesetProxy::new(ruleset.clone());
-        let commands = proxy
+        let mut rules_ = Rules::new(ruleset.clone());
+        let commands = rules_
             .delete_rules(rules, exceptions)
             .map_err(|_| NotificationSettingsError::UnableToRemovePushRule)?;
+
         self.execute_commands(commands)
             .await
             .map_err(|_| NotificationSettingsError::UnableToRemovePushRule)?;
-        *ruleset = proxy.ruleset;
+        *ruleset = rules_.ruleset;
 
         Ok(())
     }
@@ -292,14 +292,14 @@ impl NotificationSettings {
         notify: bool,
     ) -> Result<(), NotificationSettingsError> {
         let ruleset = &mut *self.ruleset.write().await;
-        let mut proxy = RulesetProxy::new(ruleset.clone());
-        let commands = proxy
+        let mut rules = Rules::new(ruleset.clone());
+        let commands = rules
             .insert_room_rule(kind, room_id, notify)
             .map_err(|_| NotificationSettingsError::UnableToAddPushRule)?;
         self.execute_commands(commands)
             .await
             .map_err(|_| NotificationSettingsError::UnableToAddPushRule)?;
-        *ruleset = proxy.ruleset;
+        *ruleset = rules.ruleset;
 
         Ok(())
     }
