@@ -11,6 +11,7 @@ e2e-encryption = ["matrix-sdk/e2e-encryption"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
 
+experimental-polls = ["ruma/unstable-msc3381"]
 experimental-room-list = ["experimental-sliding-sync", "dep:async-stream", "dep:eyeball-im-util"]
 experimental-notification = ["experimental-sliding-sync", "dep:async-stream"]
 experimental-sliding-sync = ["matrix-sdk/experimental-sliding-sync"]

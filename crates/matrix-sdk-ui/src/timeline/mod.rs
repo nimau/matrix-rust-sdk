@@ -392,6 +392,10 @@ impl Timeline {
             TimelineItemContent::Sticker(sticker) => {
                 AnyMessageLikeEventContent::Sticker(sticker.content)
             }
+            #[cfg(feature = "experimental-polls")]
+            TimelineItemContent::Poll(_) => {
+                error_return!("Retrying polls is not currently supported");
+            }
             TimelineItemContent::UnableToDecrypt(_) => {
                 error_return!("Invalid state: attempting to retry a UTD item");
             }

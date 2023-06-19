@@ -75,6 +75,9 @@ pub enum TimelineItemContent {
     /// An `m.sticker` event.
     Sticker(Sticker),
 
+    #[cfg(feature = "experimental-polls")]
+    Poll(PollState),
+
     /// An `m.room.encrypted` event that could not be decrypted.
     UnableToDecrypt(EncryptedMessage),
 
@@ -423,6 +426,13 @@ impl Sticker {
     pub fn content(&self) -> &StickerEventContent {
         &self.content
     }
+}
+
+/// State for a poll start event and related answers and close event, if any.
+#[cfg(feature = "experimental-polls")]
+#[derive(Clone, Debug)]
+pub struct PollState {
+    // TODO: keep current state of the poll here
 }
 
 /// An event changing a room membership.

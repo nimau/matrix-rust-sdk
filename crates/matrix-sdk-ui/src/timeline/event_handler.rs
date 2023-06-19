@@ -293,6 +293,19 @@ impl<'a> TimelineEventHandler<'a> {
                 AnyMessageLikeEventContent::Sticker(c) => {
                     self.add(NewEventTimelineItem::sticker(c));
                 }
+                #[cfg(feature = "experimental-polls")]
+                AnyMessageLikeEventContent::PollStart(c) => {
+                    todo!("handle poll start: {c:?}");
+                }
+                #[cfg(feature = "experimental-polls")]
+                AnyMessageLikeEventContent::PollResponse(c) => {
+                    // If poll is already closed, ignore (but maybe log)
+                    todo!("handle poll response: {c:?}");
+                }
+                #[cfg(feature = "experimental-polls")]
+                AnyMessageLikeEventContent::PollEnd(c) => {
+                    todo!("handle poll end: {c:?}");
+                }
                 // TODO
                 _ => {
                     debug!(
@@ -365,6 +378,10 @@ impl<'a> TimelineEventHandler<'a> {
                 TimelineItemContent::Sticker(_) => {
                     info!("Edit event applies to a sticker, discarding");
                     return None;
+                }
+                #[cfg(feature = "experimental-polls")]
+                TimelineItemContent::Poll(_) => {
+                    todo!("is editing polls a thing?");
                 }
                 TimelineItemContent::UnableToDecrypt(_) => {
                     info!("Edit event applies to event that couldn't be decrypted, discarding");
