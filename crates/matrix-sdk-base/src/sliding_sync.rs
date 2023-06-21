@@ -15,6 +15,7 @@
 #[cfg(feature = "e2e-encryption")]
 use std::ops::Deref;
 
+use matrix_sdk_common::deserialized_responses::SyncTimelineEvent;
 use ruma::{
     api::client::sync::sync_events::{
         v3::{self, InvitedRoom, RoomSummary},
@@ -245,6 +246,11 @@ impl BaseClient {
             )
             .await?;
 
+        // This caches the latest event when it comes through via sync.
+        // We probably also want to do this later, if it was encrypted, and now it has
+        // been decrypted.
+        room_info.latest_event = choose_event_to_cache(&timeline.events);
+
         #[cfg(feature = "e2e-encryption")]
         if room_info.is_encrypted() {
             if let Some(o) = self.olm_machine().await.as_ref() {
@@ -361,6 +367,11 @@ impl BaseClient {
             }
         }
     }
+}
+
+fn choose_event_to_cache(events: &[SyncTimelineEvent]) -> Option<SyncTimelineEvent> {
+    // Later, we will be cleverer. For now, the last event
+    events.last().cloned()
 }
 
 fn process_room_properties(room_data: &v4::SlidingSyncRoom, room_info: &mut RoomInfo) {
@@ -669,6 +680,30 @@ mod test {
         );
     }
 
+    #[async_test]
+    async fn last_event_from_sliding_sync_is_cached() {
+        // Given a logged-in client
+        let client = logged_in_client().await;
+        let room_id = room_id!("!r:e.uk");
+        let event_a =
+            json!({"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"A"}});
+        let event_b =
+            json!({"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"B"}});
+
+        // When the sliding sync response contains a timeline
+        let events = &[event_a, event_b.clone()];
+        let room = room_with_timeline(events);
+        let response = response_with_room(room_id, room).await;
+        client.process_sliding_sync(&response).await.expect("Failed to process sync");
+
+        // Then the room holds the latest event
+        let client_room = client.get_room(room_id).expect("No room found");
+        assert_eq!(
+            client_room.latest_event().unwrap().event.json().to_string(),
+            event_b.to_string()
+        );
+    }
+
     async fn membership(
         client: &BaseClient,
         room_id: &RoomId,
@@ -773,6 +808,17 @@ mod test {
             None,
         ));
 
+        room
+    }
+
+    fn room_with_timeline(events: &[serde_json::Value]) -> v4::SlidingSyncRoom {
+        let mut room = v4::SlidingSyncRoom::new();
+        room.timeline.extend(
+            events
+                .iter()
+                .map(|e| Raw::from_json_string(e.to_string()).unwrap())
+                .collect::<Vec<_>>(),
+        );
         room
     }
 
