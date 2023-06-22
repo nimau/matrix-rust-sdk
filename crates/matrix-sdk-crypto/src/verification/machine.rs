@@ -18,6 +18,7 @@ use std::{
 };
 
 use dashmap::DashMap;
+use futures_util::{stream, StreamExt};
 use ruma::{
     events::{
         key::verification::VerificationMethod, AnyToDeviceEvent, AnyToDeviceEventContent,
@@ -92,7 +93,7 @@ impl VerificationMachine {
 
         self.insert_request(verification.clone());
 
-        let request = verification.request_to_device();
+        let request = verification.request_to_device().await;
 
         (verification, request.into())
     }
@@ -166,7 +167,7 @@ impl VerificationMachine {
     /// Add a new `VerificationRequest` object to the cache.
     /// If there are any existing requests with this user (and different
     /// flow_id), both the existing and new request will be cancelled.
-    fn insert_request(&self, request: VerificationRequest) {
+    async fn insert_request(&self, request: VerificationRequest) {
         if let Some(r) = self.get_request(request.other_user(), request.flow_id().as_str()) {
             debug!(flow_id = r.flow_id().as_str(), "Ignoring known verification request",);
             return;
@@ -181,17 +182,17 @@ impl VerificationMachine {
         for old in user_requests {
             let old_verification = old.value();
 
-            if !old_verification.is_cancelled() {
+            if !old_verification.is_cancelled().await {
                 warn!(
                     "Received a new verification request whilst another request \
                     with the same user is ongoing. Cancelling both requests."
                 );
 
-                if let Some(r) = old_verification.cancel() {
+                if let Some(r) = old_verification.cancel().await {
                     self.verifications.add_request(r.into())
                 }
 
-                if let Some(r) = request.cancel() {
+                if let Some(r) = request.cancel().await {
                     self.verifications.add_request(r.into())
                 }
             }
@@ -243,23 +244,27 @@ impl VerificationMachine {
         self.verifications.outgoing_requests()
     }
 
-    pub fn garbage_collect(&self) -> Vec<Raw<AnyToDeviceEvent>> {
+    pub async fn garbage_collect(&self) -> Vec<Raw<AnyToDeviceEvent>> {
         let mut events = vec![];
 
         for user_verification in self.requests.iter() {
-            user_verification.retain(|_, v| !(v.is_done() || v.is_cancelled()));
+            for kv in user_verification.iter() {
+                let (k, v) = kv.pair();
+                if v.is_done().await || v.is_cancelled().await {
+                    let key = k.to_owned();
+                    // Drop the RefMulti before remove to avoid a deadlock
+                    drop(kv);
+                    user_verification.remove(&key);
+                }
+            }
         }
         self.requests.retain(|_, v| !v.is_empty());
 
-        let mut requests: Vec<OutgoingVerificationRequest> = self
-            .requests
-            .iter()
-            .flat_map(|v| {
-                let requests: Vec<OutgoingVerificationRequest> =
-                    v.value().iter().filter_map(|v| v.cancel_if_timed_out()).collect();
-                requests
-            })
-            .collect();
+        let mut requests: Vec<OutgoingVerificationRequest> =
+            stream::iter(self.requests.iter().flat_map(|v| v.value()))
+                .filter_map(|v| async move { v.cancel_if_timed_out().await })
+                .collect()
+                .await;
 
         requests.extend(self.verifications.garbage_collect().into_iter());
 
@@ -721,7 +726,7 @@ mod tests {
             None,
         );
 
-        let request = bob_request.request_to_device();
+        let request = bob_request.request_to_device().await;
         let content: OutgoingContent = request.try_into().unwrap();
 
         machine
@@ -733,7 +738,7 @@ mod tests {
             machine.get_request(bob_request.other_user(), bob_request.flow_id().as_str()).unwrap();
 
         // We're not yet cancelled.
-        assert!(!alice_request.is_cancelled());
+        assert!(!alice_request.is_cancelled().await);
 
         let second_transaction_id = TransactionId::new();
         let bob_request = VerificationRequest::new(
@@ -745,7 +750,7 @@ mod tests {
             None,
         );
 
-        let request = bob_request.request_to_device();
+        let request = bob_request.request_to_device().await;
         let content: OutgoingContent = request.try_into().unwrap();
 
         machine
@@ -760,8 +765,8 @@ mod tests {
         assert_eq!(second_request.flow_id().as_str(), second_transaction_id);
 
         // Make sure both of them are cancelled.
-        assert!(alice_request.is_cancelled());
-        assert!(second_request.is_cancelled());
+        assert!(alice_request.is_cancelled().await);
+        assert!(second_request.is_cancelled().await);
     }
 
     /// Ensure that if a duplicate request is added (i.e. matching user and
@@ -783,7 +788,7 @@ mod tests {
             None,
         );
 
-        let request = bob_request.request_to_device();
+        let request = bob_request.request_to_device().await;
         let content: OutgoingContent = request.try_into().unwrap();
 
         machine
@@ -795,7 +800,7 @@ mod tests {
             machine.get_request(bob_request.other_user(), bob_request.flow_id().as_str()).unwrap();
 
         // We're not yet cancelled.
-        assert!(!first_request.is_cancelled());
+        assert!(!first_request.is_cancelled().await);
 
         // Bob is adding a second request with the same flow_id as before
         let bob_request = VerificationRequest::new(
@@ -807,7 +812,7 @@ mod tests {
             None,
         );
 
-        let request = bob_request.request_to_device();
+        let request = bob_request.request_to_device().await;
         let content: OutgoingContent = request.try_into().unwrap();
 
         machine
@@ -819,7 +824,7 @@ mod tests {
             machine.get_request(bob_request.other_user(), bob_request.flow_id().as_str()).unwrap();
 
         // None of the requests are cancelled
-        assert!(!first_request.is_cancelled());
-        assert!(!second_request.is_cancelled());
+        assert!(!first_request.is_cancelled().await);
+        assert!(!second_request.is_cancelled().await);
     }
 }
