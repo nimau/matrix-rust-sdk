@@ -394,6 +394,11 @@ impl Timeline {
         Ok(())
     }
 
+    /// Retry sending all failed messages.
+    pub async fn retry_send_all(&self) -> Result<(), Error> {
+        todo!()
+    }
+
     /// Discard a local echo for a message that failed to send.
     ///
     /// Returns whether the local echo with the given transaction ID was found.
