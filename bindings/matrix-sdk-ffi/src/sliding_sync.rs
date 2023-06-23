@@ -148,10 +148,8 @@ impl SlidingSyncRoom {
         Some(self.client.inner.get_room(self.inner.room_id())?.avatar_url()?.into())
     }
 
-    #[allow(clippy::significant_drop_in_scrutinee)]
     pub fn latest_room_message(&self) -> Option<Arc<EventTimelineItem>> {
-        let item = RUNTIME.block_on(self.inner.latest_event())?;
-        Some(Arc::new(EventTimelineItem(item)))
+        self.inner.latest_timeline_item().map(|i| Arc::new(EventTimelineItem(i)))
     }
 
     pub fn add_timeline_listener(

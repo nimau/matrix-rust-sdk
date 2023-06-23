@@ -355,9 +355,7 @@ impl RoomListItem {
     }
 
     fn latest_event(&self) -> Option<Arc<EventTimelineItem>> {
-        RUNTIME.block_on(async {
-            self.inner.latest_event().await.map(EventTimelineItem).map(Arc::new)
-        })
+        self.inner.latest_event().map(EventTimelineItem).map(Arc::new)
     }
 
     fn has_unread_notifications(&self) -> bool {
