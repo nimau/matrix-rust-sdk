@@ -21,7 +21,7 @@ use ruma::{
         v3::{self, InvitedRoom, RoomSummary},
         v4::{self, AccountData},
     },
-    events::AnySyncStateEvent,
+    events::{AnySyncStateEvent, AnySyncTimelineEvent},
     RoomId,
 };
 use tracing::{debug, info, instrument};
@@ -371,7 +371,17 @@ impl BaseClient {
 
 fn choose_event_to_cache(events: &[SyncTimelineEvent]) -> Option<SyncTimelineEvent> {
     // Later, we will be cleverer. For now, the last event
-    events.last().cloned()
+    events
+        .iter()
+        .rfind(|&e| {
+            let timeline_event: serde_json::Result<AnySyncTimelineEvent> = e.event.deserialize();
+            if let Ok(timeline_event) = timeline_event {
+                timeline_event.event_type().to_string() == "m.room.message"
+            } else {
+                false
+            }
+        })
+        .cloned()
 }
 
 fn process_room_properties(room_data: &v4::SlidingSyncRoom, room_info: &mut RoomInfo) {
@@ -685,10 +695,20 @@ mod test {
         // Given a logged-in client
         let client = logged_in_client().await;
         let room_id = room_id!("!r:e.uk");
-        let event_a =
-            json!({"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"A"}});
-        let event_b =
-            json!({"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"B"}});
+        let event_a = json!({
+            "sender":"@alice:example.com",
+            "type":"m.room.message",
+            "event_id": "$ida",
+            "origin_server_ts": 12344446,
+            "content":{"body":"A", "msgtype": "m.text"}
+        });
+        let event_b = json!({
+            "sender":"@alice:example.com",
+            "type":"m.room.message",
+            "event_id": "$idb",
+            "origin_server_ts": 12344447,
+            "content":{"body":"B", "msgtype": "m.text"}
+        });
 
         // When the sliding sync response contains a timeline
         let events = &[event_a, event_b.clone()];
@@ -702,6 +722,65 @@ mod test {
             client_room.latest_event().unwrap().event.json().to_string(),
             event_b.to_string()
         );
+    }
+
+    #[test]
+    fn when_no_events_we_dont_cache_any() {
+        let events = &[];
+        let chosen = choose_event_to_cache(events);
+        assert!(chosen.is_none());
+    }
+
+    #[test]
+    fn when_only_one_event_we_cache_it() {
+        let event1 = make_event("m.room.message", "$1");
+        let events = &[event1.clone()];
+        let chosen = choose_event_to_cache(events);
+        assert_eq!(chosen.unwrap().event.json().to_string(), event1.event.json().to_string());
+    }
+
+    #[test]
+    fn with_multiple_events_we_cache_the_last_one() {
+        let event1 = make_event("m.room.message", "$1");
+        let event2 = make_event("m.room.message", "$2");
+        let events = &[event1, event2.clone()];
+        let chosen = choose_event_to_cache(events);
+        assert_eq!(chosen.unwrap().event.json().to_string(), event2.event.json().to_string());
+    }
+
+    #[test]
+    fn dont_cache_power_level_changes_even_if_they_are_last() {
+        let event1 = make_event("m.room.message", "$1");
+        let event2 = make_event("m.room.message", "$2");
+        let event3 = make_event("m.room.powerlevels", "$3");
+        let event4 = make_event("m.room.powerlevels", "$5");
+        let events = &[event1, event2.clone(), event3, event4];
+        let chosen = choose_event_to_cache(events);
+        assert_eq!(chosen.unwrap().event.json().to_string(), event2.event.json().to_string());
+    }
+
+    #[test]
+    fn prefer_to_cache_nothing_rather_than_power_levels() {
+        let event1 = make_event("m.room.power_levels", "$1");
+        let events = &[event1];
+        let chosen = choose_event_to_cache(events);
+        assert!(chosen.is_none());
+    }
+
+    fn make_event(typ: &str, id: &str) -> SyncTimelineEvent {
+        SyncTimelineEvent::new(
+            Raw::from_json_string(
+                json!({
+                    "type": typ,
+                    "event_id": id,
+                    "content": { "msgtype": "m.text", "body": "my msg" },
+                    "sender": "@u:h.uk",
+                    "origin_server_ts": 12344445,
+                })
+                .to_string(),
+            )
+            .unwrap(),
+        )
     }
 
     async fn membership(
