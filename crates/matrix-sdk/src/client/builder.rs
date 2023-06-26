@@ -304,6 +304,7 @@ impl ClientBuilder {
     }
 
     /// Public for test only
+    #[doc(hidden)]
     pub fn base_client(mut self, base_client: BaseClient) -> Self {
         self.base_client = Some(base_client);
         self

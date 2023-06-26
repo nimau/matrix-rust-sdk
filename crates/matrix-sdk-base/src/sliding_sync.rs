@@ -21,7 +21,7 @@ use ruma::{
         v3::{self, InvitedRoom, RoomSummary},
         v4::{self, AccountData},
     },
-    events::{AnySyncStateEvent, AnySyncTimelineEvent},
+    events::{AnySyncStateEvent, AnySyncTimelineEvent, TimelineEventType},
     RoomId,
 };
 use tracing::{debug, info, instrument};
@@ -376,7 +376,7 @@ fn choose_event_to_cache(events: &[SyncTimelineEvent]) -> Option<SyncTimelineEve
         .rfind(|&e| {
             let timeline_event: serde_json::Result<AnySyncTimelineEvent> = e.event.deserialize();
             if let Ok(timeline_event) = timeline_event {
-                timeline_event.event_type().to_string() == "m.room.message"
+                timeline_event.event_type() == TimelineEventType::RoomMessage
             } else {
                 false
             }
