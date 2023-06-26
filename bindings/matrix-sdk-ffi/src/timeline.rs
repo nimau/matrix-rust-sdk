@@ -1069,12 +1069,6 @@ pub struct ReactionSenderData {
     pub ts: u64,
 }
 
-#[derive(Clone)]
-pub struct ReactionDetails {
-    pub id: String,
-    pub sender: String,
-}
-
 /// A [`TimelineItem`](super::TimelineItem) that doesn't correspond to an event.
 #[derive(uniffi::Enum)]
 pub enum VirtualTimelineItem {
