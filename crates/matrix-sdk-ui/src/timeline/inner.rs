@@ -230,7 +230,11 @@ impl<P: RoomDataProvider> TimelineInner<P> {
             (to_redact_local, to_redact_remote) => {
                 // The reaction exists, redact local echo and/or remote echo
                 let no_reason = RoomRedactionEventContent::default();
-                let Some(to_redact) = EventItemIdentifier::new(to_redact_local.cloned(), to_redact_remote.cloned()) else {
+                let to_redact = if let Some(to_redact_local) = to_redact_local {
+                    EventItemIdentifier::TransactionId(to_redact_local.clone())
+                } else if let Some(to_redact_remote) = to_redact_remote {
+                    EventItemIdentifier::EventId(to_redact_remote.clone())
+                } else {
                     error!("Transaction id and event id are both missing");
                     return Err(super::Error::FailedToToggleReaction);
                 };
@@ -477,10 +481,6 @@ impl<P: RoomDataProvider> TimelineInner<P> {
 
                 TimelineEventHandler::new(event_meta, flow, state, self.track_read_receipts)
                     .handle_event(kind);
-            }
-            EventItemIdentifier::Both(_, _) => {
-                // FIXME: doest this happen ?
-                panic!("Updating both a local and a remote echo")
             }
         }
     }

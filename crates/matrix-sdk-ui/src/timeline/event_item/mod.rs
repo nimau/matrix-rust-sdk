@@ -71,34 +71,6 @@ pub(super) enum EventTimelineItemKind {
 pub enum EventItemIdentifier {
     TransactionId(OwnedTransactionId),
     EventId(OwnedEventId),
-    Both(OwnedTransactionId, OwnedEventId),
-}
-
-impl EventItemIdentifier {
-    pub fn new(txn_id: Option<OwnedTransactionId>, event_id: Option<OwnedEventId>) -> Option<Self> {
-        match (txn_id, event_id) {
-            (None, None) => None,
-            (None, Some(event_id)) => Some(EventItemIdentifier::EventId(event_id)),
-            (Some(txn_id), None) => Some(EventItemIdentifier::TransactionId(txn_id)),
-            (Some(txn_id), Some(event_id)) => Some(EventItemIdentifier::Both(txn_id, event_id)),
-        }
-    }
-
-    pub fn transaction_id(&self) -> Option<&OwnedTransactionId> {
-        match self {
-            EventItemIdentifier::TransactionId(txn_id) => Some(txn_id),
-            EventItemIdentifier::EventId(_) => None,
-            EventItemIdentifier::Both(txn_id, _) => Some(txn_id),
-        }
-    }
-
-    pub fn event_id(&self) -> Option<&OwnedEventId> {
-        match self {
-            EventItemIdentifier::TransactionId(_) => None,
-            EventItemIdentifier::EventId(event_id) => Some(event_id),
-            EventItemIdentifier::Both(_, event_id) => Some(event_id),
-        }
-    }
 }
 
 /// Data associated with a reaction sender.

@@ -410,7 +410,10 @@ impl ReactionGroup {
         user_id: &'a UserId,
     ) -> impl Iterator<Item = (Option<&OwnedTransactionId>, Option<&OwnedEventId>)> + 'a {
         self.iter().filter_map(move |(k, v)| {
-            (v.id == user_id).then_some((k.transaction_id(), k.event_id()))
+            (v.id == user_id).then_some(match k {
+                EventItemIdentifier::TransactionId(txn_id) => (Some(txn_id), None),
+                EventItemIdentifier::EventId(event_id) => (None, Some(event_id)),
+            })
         })
     }
 }

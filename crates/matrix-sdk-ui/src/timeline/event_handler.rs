@@ -466,14 +466,14 @@ impl<'a> TimelineEventHandler<'a> {
             }
         } else {
             trace!("Timeline item not found, adding reaction to the pending list");
-            let Some(reaction_event_id) = reaction_id.event_id() else {
+            let EventItemIdentifier::EventId(reaction_event_id) = reaction_id.clone() else {
                 error!("Adding local reaction echo to event absent from the timeline");
                 return;
             };
 
             let pending = self.pending_reactions.entry(event_id.to_owned()).or_default();
 
-            pending.insert(reaction_event_id.clone());
+            pending.insert(reaction_event_id);
         }
 
         if let Flow::Remote { txn_id: Some(txn_id), .. } = &self.flow {
