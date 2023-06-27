@@ -20,8 +20,8 @@ use once_cell::sync::Lazy;
 use ruma::{
     events::{receipt::Receipt, room::message::MessageType, AnySyncTimelineEvent},
     serde::Raw,
-    EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedMxcUri, OwnedUserId, TransactionId,
-    UserId,
+    EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedMxcUri, OwnedTransactionId,
+    OwnedUserId, TransactionId, UserId,
 };
 
 mod content;
@@ -63,6 +63,26 @@ pub(super) enum EventTimelineItemKind {
     Local(LocalEventTimelineItem),
     /// An event received from the server.
     Remote(RemoteEventTimelineItem),
+}
+
+/// A wrapper that can contain either a transaction id or
+/// an event id in order to identify a specific event.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct EventItemIdentifier {
+    pub txn_id: Option<OwnedTransactionId>,
+    pub event_id: Option<OwnedEventId>,
+}
+
+impl From<OwnedTransactionId> for EventItemIdentifier {
+    fn from(value: OwnedTransactionId) -> Self {
+        Self { txn_id: Some(value), event_id: None }
+    }
+}
+
+impl From<OwnedEventId> for EventItemIdentifier {
+    fn from(value: OwnedEventId) -> Self {
+        Self { txn_id: None, event_id: Some(value) }
+    }
 }
 
 impl EventTimelineItem {

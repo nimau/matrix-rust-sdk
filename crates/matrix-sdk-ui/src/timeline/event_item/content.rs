@@ -59,7 +59,7 @@ use ruma::{
 };
 use tracing::{debug, error};
 
-use super::{EventTimelineItem, Profile, TimelineDetails};
+use super::{EventItemIdentifier, EventTimelineItem, Profile, TimelineDetails};
 use crate::timeline::{
     traits::RoomDataProvider, Error as TimelineError, TimelineItem, DEFAULT_SANITIZER_MODE,
 };
@@ -389,7 +389,7 @@ pub type BundledReactions = IndexMap<String, ReactionGroup>;
 
 // The long type after a long visibility specified trips up rustfmt currently.
 // This works around. Report: https://github.com/rust-lang/rustfmt/issues/5703
-type ReactionGroupInner = IndexMap<(Option<OwnedTransactionId>, Option<OwnedEventId>), OwnedUserId>;
+type ReactionGroupInner = IndexMap<EventItemIdentifier, OwnedUserId>;
 
 /// A group of reaction events on the same event with the same key.
 ///
@@ -413,13 +413,14 @@ impl ReactionGroup {
         &'a self,
         user_id: &'a UserId,
     ) -> impl Iterator<Item = (Option<&OwnedTransactionId>, Option<&OwnedEventId>)> + 'a {
-        self.iter()
-            .filter_map(move |(k, v)| (*v == user_id).then_some((k.0.as_ref(), k.1.as_ref())))
+        self.iter().filter_map(move |(k, v)| {
+            (*v == user_id).then_some((k.txn_id.as_ref(), k.event_id.as_ref()))
+        })
     }
 }
 
 impl Deref for ReactionGroup {
-    type Target = IndexMap<(Option<OwnedTransactionId>, Option<OwnedEventId>), OwnedUserId>;
+    type Target = IndexMap<EventItemIdentifier, OwnedUserId>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

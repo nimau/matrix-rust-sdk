@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use ruma::{server_name, user_id, EventId, OwnedEventId, OwnedTransactionId, UserId};
+use ruma::{server_name, user_id, EventId, UserId};
 
 use crate::timeline::{
+    event_item::EventItemIdentifier,
     tests::{ALICE, BOB},
     ReactionGroup,
 };
@@ -34,7 +35,7 @@ fn by_sender() {
     let alice_reactions = reaction_group.by_sender(&alice).collect::<Vec<_>>();
 
     let reaction = *alice_reactions.get(0).unwrap();
-    assert_eq!(*reaction.1.unwrap(), reaction_1.1.unwrap());
+    assert_eq!(*reaction.1.unwrap(), reaction_1.event_id.unwrap());
 }
 
 #[test]
@@ -91,7 +92,7 @@ fn insert(group: &mut ReactionGroup, sender: &UserId, count: u64) {
     }
 }
 
-fn new_reaction() -> (Option<OwnedTransactionId>, Option<OwnedEventId>) {
+fn new_reaction() -> EventItemIdentifier {
     let event_id = EventId::new(server_name!("example.org"));
-    (None, Some(event_id))
+    EventItemIdentifier::from(event_id)
 }
