@@ -53,7 +53,7 @@ use super::{
     ReactionGroup, TimelineDetails, TimelineInnerState, TimelineItem, TimelineItemContent,
     VirtualTimelineItem, DEFAULT_SANITIZER_MODE,
 };
-use crate::events::SyncTimelineEventWithoutContent;
+use crate::{events::SyncTimelineEventWithoutContent, timeline::event_item::ReactionSenderData};
 
 #[derive(Clone)]
 pub(super) enum Flow {
@@ -449,7 +449,10 @@ impl<'a> TimelineEventHandler<'a> {
                         );
                     }
                 }
-                reaction_group.0.insert(reaction_id.clone(), self.meta.sender.clone());
+                reaction_group.0.insert(
+                    reaction_id.clone(),
+                    ReactionSenderData { id: self.meta.sender.clone(), ts: self.meta.timestamp },
+                );
 
                 trace!("Adding reaction");
                 self.items.set(
@@ -904,7 +907,13 @@ impl<'a> TimelineEventHandler<'a> {
 
                     let group: &mut ReactionGroup =
                         bundled.entry(annotation.key.clone()).or_default();
-                    group.0.insert(reaction_id, sender.clone());
+                    group.0.insert(
+                        reaction_id,
+                        ReactionSenderData {
+                            id: sender.clone(),
+                            ts: MilliSecondsSinceUnixEpoch::now(),
+                        },
+                    );
                 }
 
                 Some(bundled)

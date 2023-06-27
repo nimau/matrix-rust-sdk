@@ -85,6 +85,15 @@ impl From<OwnedEventId> for EventItemIdentifier {
     }
 }
 
+/// Data associated with a reaction sender.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReactionSenderData {
+    /// Sender identifier.
+    pub id: OwnedUserId,
+    /// Date at which the sender reacted.
+    pub ts: MilliSecondsSinceUnixEpoch,
+}
+
 impl EventTimelineItem {
     pub(super) fn new(
         sender: OwnedUserId,

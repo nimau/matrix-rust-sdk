@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use ruma::{server_name, user_id, EventId, UserId};
+use ruma::{server_name, user_id, EventId, MilliSecondsSinceUnixEpoch, OwnedUserId, UserId};
 
 use crate::timeline::{
-    event_item::EventItemIdentifier,
+    event_item::{EventItemIdentifier, ReactionSenderData},
     tests::{ALICE, BOB},
     ReactionGroup,
 };
@@ -29,8 +29,8 @@ fn by_sender() {
     let reaction_2 = new_reaction();
 
     let mut reaction_group = ReactionGroup::default();
-    reaction_group.0.insert(reaction_1.clone(), alice.clone());
-    reaction_group.0.insert(reaction_2, bob);
+    reaction_group.0.insert(reaction_1.clone(), new_sender_data(alice.clone()));
+    reaction_group.0.insert(reaction_2, new_sender_data(bob));
 
     let alice_reactions = reaction_group.by_sender(&alice).collect::<Vec<_>>();
 
@@ -58,9 +58,9 @@ fn by_sender_with_multiple_users() {
     let reaction_3 = new_reaction();
 
     let mut reaction_group = ReactionGroup::default();
-    reaction_group.0.insert(reaction_1, alice.clone());
-    reaction_group.0.insert(reaction_2, alice.clone());
-    reaction_group.0.insert(reaction_3, bob.clone());
+    reaction_group.0.insert(reaction_1, new_sender_data(alice.clone()));
+    reaction_group.0.insert(reaction_2, new_sender_data(alice.clone()));
+    reaction_group.0.insert(reaction_3, new_sender_data(bob.clone()));
 
     let alice_reactions = reaction_group.by_sender(&alice).collect::<Vec<_>>();
     let bob_reactions = reaction_group.by_sender(&bob).collect::<Vec<_>>();
@@ -83,16 +83,24 @@ fn senders_are_deduplicated() {
         group
     };
 
-    assert_eq!(group.senders().collect::<Vec<_>>(), vec![&ALICE.to_owned(), &BOB.to_owned()]);
+    let senders = group.senders().map(|v| &v.id).collect::<Vec<_>>();
+    assert_eq!(senders, vec![&ALICE.to_owned(), &BOB.to_owned()]);
 }
 
 fn insert(group: &mut ReactionGroup, sender: &UserId, count: u64) {
     for _ in 0..count {
-        group.0.insert(new_reaction(), sender.to_owned());
+        group.0.insert(
+            new_reaction(),
+            ReactionSenderData { id: sender.to_owned(), ts: MilliSecondsSinceUnixEpoch::now() },
+        );
     }
 }
 
 fn new_reaction() -> EventItemIdentifier {
     let event_id = EventId::new(server_name!("example.org"));
     EventItemIdentifier::from(event_id)
+}
+
+fn new_sender_data(sender: OwnedUserId) -> ReactionSenderData {
+    ReactionSenderData { id: sender, ts: MilliSecondsSinceUnixEpoch::now() }
 }

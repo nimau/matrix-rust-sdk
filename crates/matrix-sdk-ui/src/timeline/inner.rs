@@ -61,7 +61,7 @@ use super::{
         update_read_marker, Flow, HandleEventResult, TimelineEventHandler, TimelineEventKind,
         TimelineEventMetadata, TimelineItemPosition,
     },
-    event_item::EventItemIdentifier,
+    event_item::{EventItemIdentifier, ReactionSenderData},
     reactions::ReactionToggleResult,
     rfind_event_by_id, rfind_event_item,
     traits::RoomDataProvider,
@@ -1273,7 +1273,11 @@ fn update_timeline_reaction(
         // Add the remote echo to the related event
         if let Some(event_id) = remote_echo_to_add {
             let own_user_id = own_user_id.to_owned();
-            reaction_group.0.insert(EventItemIdentifier::from(event_id.clone()), own_user_id);
+            reaction_group.0.insert(
+                EventItemIdentifier::from(event_id.clone()),
+                // FIXME: need to get the actual timestamp of that event server side.
+                ReactionSenderData { id: own_user_id, ts: MilliSecondsSinceUnixEpoch::now() },
+            );
         };
         if reaction_group.0.is_empty() {
             reactions.remove(&annotation.key);
