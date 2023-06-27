@@ -441,12 +441,9 @@ impl<'a> TimelineEventHandler<'a> {
                 let reaction_group = reactions.entry(c.relates_to.key.clone()).or_default();
 
                 if let Some(txn_id) = old_txn_id {
+                    let id = EventItemIdentifier::TransactionId(txn_id.clone());
                     // Remove the local echo from the related event.
-                    if reaction_group
-                        .0
-                        .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
-                        .is_none()
-                    {
+                    if reaction_group.0.remove(&id).is_none() {
                         warn!(
                             "Received reaction with transaction ID, but didn't \
                              find matching reaction in the related event's reactions"
@@ -480,12 +477,9 @@ impl<'a> TimelineEventHandler<'a> {
         }
 
         if let Flow::Remote { txn_id: Some(txn_id), .. } = &self.flow {
+            let id = EventItemIdentifier::TransactionId(txn_id.clone());
             // Remove the local echo from the reaction map.
-            if self
-                .reaction_map
-                .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
-                .is_none()
-            {
+            if self.reaction_map.remove(&id).is_none() {
                 warn!(
                     "Received reaction with transaction ID, but didn't \
                      find matching reaction in reaction_map"
@@ -504,9 +498,8 @@ impl<'a> TimelineEventHandler<'a> {
     // Redacted redactions are no-ops (unfortunately)
     #[instrument(skip_all, fields(redacts_event_id = ?redacts))]
     fn handle_redaction(&mut self, redacts: OwnedEventId, _content: RoomRedactionEventContent) {
-        if let Some((_, rel)) =
-            self.reaction_map.remove(&EventItemIdentifier::EventId(redacts.clone()))
-        {
+        let id = EventItemIdentifier::EventId(redacts.clone());
+        if let Some((_, rel)) = self.reaction_map.remove(&id) {
             update_timeline_item!(self, &rel.event_id, "redaction", |event_item| {
                 let Some(remote_event_item) = event_item.as_remote() else {
                     error!("inconsistent state: redaction received on a non-remote event item");
@@ -521,7 +514,7 @@ impl<'a> TimelineEventHandler<'a> {
                     };
                     let group = group_entry.get_mut();
 
-                    if group.0.remove(&EventItemIdentifier::EventId(redacts.clone())).is_none() {
+                    if group.0.remove(&id).is_none() {
                         error!(
                             "inconsistent state: reaction from reaction_map not in reaction list \
                              of timeline item"
@@ -588,9 +581,8 @@ impl<'a> TimelineEventHandler<'a> {
         redacts: OwnedTransactionId,
         _content: RoomRedactionEventContent,
     ) {
-        if let Some((_, rel)) =
-            self.reaction_map.remove(&EventItemIdentifier::TransactionId(redacts.clone()))
-        {
+        let id = EventItemIdentifier::TransactionId(redacts);
+        if let Some((_, rel)) = self.reaction_map.remove(&id) {
             update_timeline_item!(self, &rel.event_id, "redaction", |event_item| {
                 let Some(remote_event_item) = event_item.as_remote() else {
                     error!("inconsistent state: redaction received on a non-remote event item");
@@ -603,7 +595,7 @@ impl<'a> TimelineEventHandler<'a> {
                 };
                 let group = group_entry.get_mut();
 
-                if group.0.remove(&EventItemIdentifier::TransactionId(redacts)).is_none() {
+                if group.0.remove(&id).is_none() {
                     error!(
                         "inconsistent state: reaction from reaction_map not in reaction list \
                          of timeline item"

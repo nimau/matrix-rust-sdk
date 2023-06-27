@@ -1266,11 +1266,8 @@ fn update_timeline_reaction(
 
         // Remove the local echo from the related event.
         if let Some(txn_id) = local_echo_to_remove {
-            if reaction_group
-                .0
-                .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
-                .is_none()
-            {
+            let id = EventItemIdentifier::TransactionId(txn_id.clone());
+            if reaction_group.0.remove(&id).is_none() {
                 warn!(
                     "Tried to remove reaction by transaction ID, but didn't \
                      find matching reaction in the related event's reactions"
@@ -1299,11 +1296,8 @@ fn update_timeline_reaction(
         // Remove the local echo from reaction_map
         // (should the local echo already be up-to-date after event handling?)
         if let Some(txn_id) = local_echo_to_remove {
-            if state
-                .reaction_map
-                .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
-                .is_none()
-            {
+            let id = EventItemIdentifier::TransactionId(txn_id.clone());
+            if state.reaction_map.remove(&id).is_none() {
                 warn!(
                     "Tried to remove reaction by transaction ID, but didn't \
                      find matching reaction in the reaction map"
