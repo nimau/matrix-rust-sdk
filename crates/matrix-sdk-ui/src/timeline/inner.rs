@@ -230,15 +230,16 @@ impl<P: RoomDataProvider> TimelineInner<P> {
             (to_redact_local, to_redact_remote) => {
                 // The reaction exists, redact local echo and/or remote echo
                 let no_reason = RoomRedactionEventContent::default();
+                let Some(to_redact) = EventItemIdentifier::new(to_redact_local.cloned(), to_redact_remote.cloned()) else {
+                    error!("Transaction id and event id are both missing");
+                    return Err(super::Error::FailedToToggleReaction);
+                };
                 self.handle_local_redaction_internal(
                     &mut state,
                     sender,
                     sender_profile,
                     TransactionId::new(),
-                    EventItemIdentifier {
-                        txn_id: to_redact_local.cloned(),
-                        event_id: to_redact_remote.cloned(),
-                    },
+                    to_redact,
                     no_reason.clone(),
                 )
                 .await;
@@ -463,22 +464,24 @@ impl<P: RoomDataProvider> TimelineInner<P> {
             is_highlighted: false,
         };
 
-        if let Some(redacts) = to_redact.txn_id {
-            let kind = TimelineEventKind::LocalRedaction { redacts, content: content.clone() };
+        match to_redact {
+            EventItemIdentifier::TransactionId(txn_id) => {
+                let kind =
+                    TimelineEventKind::LocalRedaction { redacts: txn_id, content: content.clone() };
 
-            TimelineEventHandler::new(
-                event_meta.clone(),
-                flow.clone(),
-                state,
-                self.track_read_receipts,
-            )
-            .handle_event(kind);
-        }
-        if let Some(redacts) = to_redact.event_id {
-            let kind = TimelineEventKind::Redaction { redacts, content };
+                TimelineEventHandler::new(event_meta, flow, state, self.track_read_receipts)
+                    .handle_event(kind);
+            }
+            EventItemIdentifier::EventId(event_id) => {
+                let kind = TimelineEventKind::Redaction { redacts: event_id, content };
 
-            TimelineEventHandler::new(event_meta, flow, state, self.track_read_receipts)
-                .handle_event(kind);
+                TimelineEventHandler::new(event_meta, flow, state, self.track_read_receipts)
+                    .handle_event(kind);
+            }
+            EventItemIdentifier::Both(_, _) => {
+                // FIXME: doest this happen ?
+                panic!("Updating both a local and a remote echo")
+            }
         }
     }
 
@@ -1263,7 +1266,11 @@ fn update_timeline_reaction(
 
         // Remove the local echo from the related event.
         if let Some(txn_id) = local_echo_to_remove {
-            if reaction_group.0.remove(&EventItemIdentifier::from(txn_id.clone())).is_none() {
+            if reaction_group
+                .0
+                .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
+                .is_none()
+            {
                 warn!(
                     "Tried to remove reaction by transaction ID, but didn't \
                      find matching reaction in the related event's reactions"
@@ -1274,7 +1281,7 @@ fn update_timeline_reaction(
         if let Some(event_id) = remote_echo_to_add {
             let own_user_id = own_user_id.to_owned();
             reaction_group.0.insert(
-                EventItemIdentifier::from(event_id.clone()),
+                EventItemIdentifier::EventId(event_id.clone()),
                 // FIXME: need to get the actual timestamp of that event server side.
                 ReactionSenderData { id: own_user_id, ts: MilliSecondsSinceUnixEpoch::now() },
             );
@@ -1292,7 +1299,11 @@ fn update_timeline_reaction(
         // Remove the local echo from reaction_map
         // (should the local echo already be up-to-date after event handling?)
         if let Some(txn_id) = local_echo_to_remove {
-            if state.reaction_map.remove(&EventItemIdentifier::from(txn_id.clone())).is_none() {
+            if state
+                .reaction_map
+                .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
+                .is_none()
+            {
                 warn!(
                     "Tried to remove reaction by transaction ID, but didn't \
                      find matching reaction in the reaction map"
@@ -1302,7 +1313,7 @@ fn update_timeline_reaction(
         // Add the remote echo to the reaction_map
         if let Some(event_id) = remote_echo_to_add {
             state.reaction_map.insert(
-                EventItemIdentifier::from(event_id.clone()),
+                EventItemIdentifier::EventId(event_id.clone()),
                 (own_user_id.to_owned(), annotation.clone()),
             );
         }

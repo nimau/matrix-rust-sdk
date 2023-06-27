@@ -35,7 +35,7 @@ fn by_sender() {
     let alice_reactions = reaction_group.by_sender(&alice).collect::<Vec<_>>();
 
     let reaction = *alice_reactions.get(0).unwrap();
-    assert_eq!(*reaction.1.unwrap(), reaction_1.event_id.unwrap());
+    assert_eq!(reaction.1.unwrap(), reaction_1.event_id().unwrap());
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn insert(group: &mut ReactionGroup, sender: &UserId, count: u64) {
 
 fn new_reaction() -> EventItemIdentifier {
     let event_id = EventId::new(server_name!("example.org"));
-    EventItemIdentifier::from(event_id)
+    EventItemIdentifier::EventId(event_id)
 }
 
 fn new_sender_data(sender: OwnedUserId) -> ReactionSenderData {

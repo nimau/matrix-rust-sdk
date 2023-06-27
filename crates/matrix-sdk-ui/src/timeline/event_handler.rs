@@ -418,9 +418,11 @@ impl<'a> TimelineEventHandler<'a> {
     fn handle_reaction(&mut self, c: ReactionEventContent) {
         let event_id: &EventId = &c.relates_to.event_id;
         let (reaction_id, old_txn_id) = match &self.flow {
-            Flow::Local { txn_id, .. } => (EventItemIdentifier::from(txn_id.clone()), None),
+            Flow::Local { txn_id, .. } => {
+                (EventItemIdentifier::TransactionId(txn_id.clone()), None)
+            }
             Flow::Remote { event_id, txn_id, .. } => {
-                (EventItemIdentifier::from(event_id.clone()), txn_id.as_ref())
+                (EventItemIdentifier::EventId(event_id.clone()), txn_id.as_ref())
             }
         };
 
@@ -441,7 +443,10 @@ impl<'a> TimelineEventHandler<'a> {
 
                 if let Some(txn_id) = old_txn_id {
                     // Remove the local echo from the related event.
-                    if reaction_group.0.remove(&EventItemIdentifier::from(txn_id.clone())).is_none()
+                    if reaction_group
+                        .0
+                        .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
+                        .is_none()
                     {
                         warn!(
                             "Received reaction with transaction ID, but didn't \
@@ -465,7 +470,7 @@ impl<'a> TimelineEventHandler<'a> {
             }
         } else {
             trace!("Timeline item not found, adding reaction to the pending list");
-            let Some(reaction_event_id) = &reaction_id.event_id else {
+            let Some(reaction_event_id) = reaction_id.event_id() else {
                 error!("Adding local reaction echo to event absent from the timeline");
                 return;
             };
@@ -477,7 +482,11 @@ impl<'a> TimelineEventHandler<'a> {
 
         if let Flow::Remote { txn_id: Some(txn_id), .. } = &self.flow {
             // Remove the local echo from the reaction map.
-            if self.reaction_map.remove(&EventItemIdentifier::from(txn_id.clone())).is_none() {
+            if self
+                .reaction_map
+                .remove(&EventItemIdentifier::TransactionId(txn_id.clone()))
+                .is_none()
+            {
                 warn!(
                     "Received reaction with transaction ID, but didn't \
                      find matching reaction in reaction_map"
@@ -497,7 +506,7 @@ impl<'a> TimelineEventHandler<'a> {
     #[instrument(skip_all, fields(redacts_event_id = ?redacts))]
     fn handle_redaction(&mut self, redacts: OwnedEventId, _content: RoomRedactionEventContent) {
         if let Some((_, rel)) =
-            self.reaction_map.remove(&EventItemIdentifier::from(redacts.clone()))
+            self.reaction_map.remove(&EventItemIdentifier::EventId(redacts.clone()))
         {
             update_timeline_item!(self, &rel.event_id, "redaction", |event_item| {
                 let Some(remote_event_item) = event_item.as_remote() else {
@@ -513,7 +522,7 @@ impl<'a> TimelineEventHandler<'a> {
                     };
                     let group = group_entry.get_mut();
 
-                    if group.0.remove(&EventItemIdentifier::from(redacts.clone())).is_none() {
+                    if group.0.remove(&EventItemIdentifier::EventId(redacts.clone())).is_none() {
                         error!(
                             "inconsistent state: reaction from reaction_map not in reaction list \
                              of timeline item"
@@ -581,7 +590,7 @@ impl<'a> TimelineEventHandler<'a> {
         _content: RoomRedactionEventContent,
     ) {
         if let Some((_, rel)) =
-            self.reaction_map.remove(&EventItemIdentifier::from(redacts.clone()))
+            self.reaction_map.remove(&EventItemIdentifier::TransactionId(redacts.clone()))
         {
             update_timeline_item!(self, &rel.event_id, "redaction", |event_item| {
                 let Some(remote_event_item) = event_item.as_remote() else {
@@ -595,7 +604,7 @@ impl<'a> TimelineEventHandler<'a> {
                 };
                 let group = group_entry.get_mut();
 
-                if group.0.remove(&EventItemIdentifier::from(redacts)).is_none() {
+                if group.0.remove(&EventItemIdentifier::TransactionId(redacts)).is_none() {
                     error!(
                         "inconsistent state: reaction from reaction_map not in reaction list \
                          of timeline item"
@@ -897,7 +906,7 @@ impl<'a> TimelineEventHandler<'a> {
                 let mut bundled = IndexMap::new();
 
                 for reaction_event_id in reactions {
-                    let reaction_id = EventItemIdentifier::from(reaction_event_id);
+                    let reaction_id = EventItemIdentifier::EventId(reaction_event_id);
                     let Some((sender, annotation)) = self.reaction_map.get(&reaction_id) else {
                         error!(
                             "inconsistent state: reaction from pending_reactions not in reaction_map"

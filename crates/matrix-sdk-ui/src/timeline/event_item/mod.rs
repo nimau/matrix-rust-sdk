@@ -68,20 +68,36 @@ pub(super) enum EventTimelineItemKind {
 /// A wrapper that can contain either a transaction id,
 /// an event id (or both) in order to identify a specific event.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct EventItemIdentifier {
-    pub txn_id: Option<OwnedTransactionId>,
-    pub event_id: Option<OwnedEventId>,
+pub enum EventItemIdentifier {
+    TransactionId(OwnedTransactionId),
+    EventId(OwnedEventId),
+    Both(OwnedTransactionId, OwnedEventId),
 }
 
-impl From<OwnedTransactionId> for EventItemIdentifier {
-    fn from(value: OwnedTransactionId) -> Self {
-        Self { txn_id: Some(value), event_id: None }
+impl EventItemIdentifier {
+    pub fn new(txn_id: Option<OwnedTransactionId>, event_id: Option<OwnedEventId>) -> Option<Self> {
+        match (txn_id, event_id) {
+            (None, None) => None,
+            (None, Some(event_id)) => Some(EventItemIdentifier::EventId(event_id)),
+            (Some(txn_id), None) => Some(EventItemIdentifier::TransactionId(txn_id)),
+            (Some(txn_id), Some(event_id)) => Some(EventItemIdentifier::Both(txn_id, event_id)),
+        }
     }
-}
 
-impl From<OwnedEventId> for EventItemIdentifier {
-    fn from(value: OwnedEventId) -> Self {
-        Self { txn_id: None, event_id: Some(value) }
+    pub fn transaction_id(&self) -> Option<&OwnedTransactionId> {
+        match self {
+            EventItemIdentifier::TransactionId(txn_id) => Some(txn_id),
+            EventItemIdentifier::EventId(_) => None,
+            EventItemIdentifier::Both(txn_id, _) => Some(txn_id),
+        }
+    }
+
+    pub fn event_id(&self) -> Option<&OwnedEventId> {
+        match self {
+            EventItemIdentifier::TransactionId(_) => None,
+            EventItemIdentifier::EventId(event_id) => Some(event_id),
+            EventItemIdentifier::Both(_, event_id) => Some(event_id),
+        }
     }
 }
 

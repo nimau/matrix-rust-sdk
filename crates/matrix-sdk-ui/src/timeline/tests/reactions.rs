@@ -145,7 +145,7 @@ async fn redact_reaction_from_non_existent_event() {
     let reaction_id = EventId::new(server_name!("example.org")); // non existent event
 
     timeline
-        .handle_local_redaction_event(EventItemIdentifier::from(reaction_id), Default::default())
+        .handle_local_redaction_event(EventItemIdentifier::EventId(reaction_id), Default::default())
         .await;
 
     assert_no_more_updates(&mut stream).await;
