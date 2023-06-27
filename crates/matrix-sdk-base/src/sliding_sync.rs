@@ -246,10 +246,9 @@ impl BaseClient {
             )
             .await?;
 
-        // This caches the latest event when it comes through via sync.
-        // We probably also want to do this later, if it was encrypted, and now it has
-        // been decrypted.
-        room_info.latest_event = choose_event_to_cache(&timeline.events);
+        // Cache the latest decrypted event in room_info, and also keep any later
+        // encrypted events, so we can slot them in when we get the keys.
+        cache_latest_events(&mut room_info, &timeline.events);
 
         #[cfg(feature = "e2e-encryption")]
         if room_info.is_encrypted() {
@@ -369,19 +368,47 @@ impl BaseClient {
     }
 }
 
-fn choose_event_to_cache(events: &[SyncTimelineEvent]) -> Option<SyncTimelineEvent> {
-    // Later, we will be cleverer. For now, the last event
-    events
-        .iter()
-        .rfind(|&e| {
-            let timeline_event: serde_json::Result<AnySyncTimelineEvent> = e.event.deserialize();
-            if let Ok(timeline_event) = timeline_event {
-                timeline_event.event_type() == TimelineEventType::RoomMessage
-            } else {
-                false
+/// Find the most recent decrypted event and cache it in the supplied RoomInfo.
+/// If any encrypted events are found after that one, store them in the RoomInfo
+/// too so we can use them when we get the relevant keys.
+fn cache_latest_events(room_info: &mut RoomInfo, events: &[SyncTimelineEvent]) {
+    let mut encrypted_events = Vec::with_capacity(room_info.latest_encrypted_events.capacity());
+    for e in events.iter().rev() {
+        let timeline_event: serde_json::Result<AnySyncTimelineEvent> = e.event.deserialize();
+        if let Ok(timeline_event) = timeline_event {
+            match timeline_event.event_type() {
+                TimelineEventType::RoomEncrypted => {
+                    // m.room.encrypted - this might be the latest event later - we can't tell until
+                    // we are able to decrypt it, so store it for now
+                    //
+                    // Check how many encrypted events we have seen. Only store another if we
+                    // haven't already stored the maximum number.
+                    if encrypted_events.len() < encrypted_events.capacity() {
+                        encrypted_events.push(e.event.clone());
+                    }
+                }
+                TimelineEventType::RoomMessage => {
+                    // m.room.message - we found one! Store it.
+                    room_info.latest_event = Some(e.clone());
+                    // We don't need any of the older encrypted events because we have a new
+                    // decrypted one.
+                    room_info.latest_encrypted_events.clear();
+                    // We can stop looking through the timeline now because everything else is
+                    // older.
+                    break;
+                }
+                _ => {
+                    // Ignore other event types
+                }
             }
-        })
-        .cloned()
+        } else {
+            timeline_event.unwrap();
+        }
+    }
+
+    // Push the encrypted events we found into the RoomInfo, in reverse order, so
+    // the latest is last
+    room_info.latest_encrypted_events.extend(encrypted_events.into_iter().rev());
 }
 
 fn process_room_properties(room_data: &v4::SlidingSyncRoom, room_info: &mut RoomInfo) {
@@ -410,6 +437,7 @@ fn process_room_properties(room_data: &v4::SlidingSyncRoom, room_info: &mut Room
 mod test {
     use std::collections::{BTreeMap, HashSet};
 
+    use matrix_sdk_common::ring_buffer::RingBuffer;
     use matrix_sdk_test::async_test;
     use ruma::{
         device_id, event_id,
@@ -718,10 +746,7 @@ mod test {
 
         // Then the room holds the latest event
         let client_room = client.get_room(room_id).expect("No room found");
-        assert_eq!(
-            client_room.latest_event().unwrap().event.json().to_string(),
-            event_b.to_string()
-        );
+        assert_eq!(ev_id(client_room.latest_event()), "$idb");
     }
 
     #[test]
@@ -736,7 +761,7 @@ mod test {
         let event1 = make_event("m.room.message", "$1");
         let events = &[event1.clone()];
         let chosen = choose_event_to_cache(events);
-        assert_eq!(chosen.unwrap().event.json().to_string(), event1.event.json().to_string());
+        assert_eq!(ev_id(chosen), rawev_id(event1));
     }
 
     #[test]
@@ -745,7 +770,7 @@ mod test {
         let event2 = make_event("m.room.message", "$2");
         let events = &[event1, event2.clone()];
         let chosen = choose_event_to_cache(events);
-        assert_eq!(chosen.unwrap().event.json().to_string(), event2.event.json().to_string());
+        assert_eq!(ev_id(chosen), rawev_id(event2));
     }
 
     #[test]
@@ -756,7 +781,7 @@ mod test {
         let event4 = make_event("m.room.powerlevels", "$5");
         let events = &[event1, event2.clone(), event3, event4];
         let chosen = choose_event_to_cache(events);
-        assert_eq!(chosen.unwrap().event.json().to_string(), event2.event.json().to_string());
+        assert_eq!(ev_id(chosen), rawev_id(event2));
     }
 
     #[test]
@@ -767,6 +792,196 @@ mod test {
         assert!(chosen.is_none());
     }
 
+    #[test]
+    fn cache_encrypted_events_that_are_after_latest_message() {
+        // Given two message events followed by two encrypted
+        let event1 = make_event("m.room.message", "$1");
+        let event2 = make_event("m.room.message", "$2");
+        let event3 = make_encrypted_event("$3");
+        let event4 = make_encrypted_event("$4");
+        let events = &[event1.clone(), event2.clone(), event3.clone(), event4.clone()];
+
+        // When I ask to cache events
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(&mut room_info, events);
+
+        // The latest message is stored
+        assert_eq!(ev_id(room_info.latest_event), rawev_id(event2));
+
+        // And also the two encrypted ones
+        assert_eq!(rawevs_ids(&room_info.latest_encrypted_events), evs_ids(&[event3, event4]));
+    }
+
+    #[test]
+    fn dont_cache_encrypted_events_that_are_before_latest_message() {
+        // Given an encrypted event before and after the message
+        let event1 = make_encrypted_event("$1");
+        let event2 = make_event("m.room.message", "$2");
+        let event3 = make_encrypted_event("$3");
+        let events = &[event1.clone(), event2.clone(), event3.clone()];
+
+        // When I ask to cache events
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(&mut room_info, events);
+
+        // The latest message is stored
+        assert_eq!(ev_id(room_info.latest_event), rawev_id(event2));
+
+        // And also the encrypted one that was after it, but not the one before
+        assert_eq!(rawevs_ids(&room_info.latest_encrypted_events), evs_ids(&[event3]));
+    }
+
+    #[test]
+    fn skip_irrelevant_events_eg_receipts_even_if_after_message() {
+        // Given two message events followed by two encrypted, with a receipt in the
+        // middle
+        let event1 = make_event("m.room.message", "$1");
+        let event2 = make_event("m.room.message", "$2");
+        let event3 = make_encrypted_event("$3");
+        let event4 = make_event("m.read", "$4");
+        let event5 = make_encrypted_event("$5");
+        let events = &[event1.clone(), event2.clone(), event3.clone(), event4, event5.clone()];
+
+        // When I ask to cache events
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(&mut room_info, events);
+
+        // The latest message is stored, ignoring the receipt
+        assert_eq!(ev_id(room_info.latest_event), rawev_id(event2));
+
+        // The two encrypted ones are stored, but not the receipt
+        assert_eq!(rawevs_ids(&room_info.latest_encrypted_events), evs_ids(&[event3, event5]));
+    }
+
+    #[test]
+    fn only_store_the_max_number_of_encrypted_events() {
+        // Given two message events followed by lots of encrypted and other irrelevant
+        // events
+        let evente = make_event("m.room.message", "$e");
+        let eventd = make_event("m.room.message", "$d");
+        let eventc = make_encrypted_event("$c");
+        let event9 = make_encrypted_event("$9");
+        let event8 = make_encrypted_event("$8");
+        let event7 = make_encrypted_event("$7");
+        let eventb = make_event("m.read", "$b");
+        let event6 = make_encrypted_event("$6");
+        let event5 = make_encrypted_event("$5");
+        let event4 = make_encrypted_event("$4");
+        let event3 = make_encrypted_event("$3");
+        let event2 = make_encrypted_event("$2");
+        let eventa = make_event("m.read", "$a");
+        let event1 = make_encrypted_event("$1");
+        let event0 = make_encrypted_event("$0");
+        let events = &[
+            evente.clone(),
+            eventd.clone(),
+            eventc.clone(),
+            event9.clone(),
+            event8.clone(),
+            event7.clone(),
+            eventb.clone(),
+            event6.clone(),
+            event5.clone(),
+            event4.clone(),
+            event3.clone(),
+            event2.clone(),
+            eventa.clone(),
+            event1.clone(),
+            event0.clone(),
+        ];
+
+        // When I ask to cache events
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(&mut room_info, events);
+
+        // The latest message is stored, ignoring encrypted and receipts
+        assert_eq!(ev_id(room_info.latest_event), rawev_id(eventd));
+
+        // Only 10 encrypted are stored, even though there were more
+        assert_eq!(
+            rawevs_ids(&room_info.latest_encrypted_events),
+            evs_ids(&[
+                event9, event8, event7, event6, event5, event4, event3, event2, event1, event0
+            ])
+        );
+    }
+
+    #[test]
+    fn dont_overflow_capacity_if_previous_encrypted_events_exist() {
+        // Given a RoomInfo with lots of encrypted events already inside it
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(
+            &mut room_info,
+            &[
+                make_encrypted_event("$0"),
+                make_encrypted_event("$1"),
+                make_encrypted_event("$2"),
+                make_encrypted_event("$3"),
+                make_encrypted_event("$4"),
+                make_encrypted_event("$5"),
+                make_encrypted_event("$6"),
+                make_encrypted_event("$7"),
+                make_encrypted_event("$8"),
+                make_encrypted_event("$9"),
+            ],
+        );
+        // Sanity: room_info has 10 encrypted events inside it
+        assert_eq!(room_info.latest_encrypted_events.len(), 10);
+
+        // When I ask to cache more encrypted events
+        let eventa = make_encrypted_event("$a");
+        cache_latest_events(&mut room_info, &[eventa]);
+
+        // The oldest event is gone
+        assert!(!rawevs_ids(&room_info.latest_encrypted_events).contains(&"$0".to_owned()));
+
+        // The newest event is last in the list
+        assert_eq!(rawevs_ids(&room_info.latest_encrypted_events)[9], "$a");
+    }
+
+    #[test]
+    fn existing_encrypted_events_are_deleted_if_we_receive_unencrypted() {
+        // Given a RoomInfo with some encrypted events already inside it
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(
+            &mut room_info,
+            &[make_encrypted_event("$0"), make_encrypted_event("$1"), make_encrypted_event("$2")],
+        );
+
+        // When I ask to cache an unecnrypted event, and some more encrypted events
+        let eventa = make_event("m.room.message", "$a");
+        let eventb = make_encrypted_event("$b");
+        cache_latest_events(&mut room_info, &[eventa, eventb]);
+
+        // The only encrypted events stored are the ones after the decrypted one
+        assert_eq!(rawevs_ids(&room_info.latest_encrypted_events), &["$b"]);
+
+        // The decrypted one is stored as the latest
+        assert_eq!(rawev_id(room_info.latest_event.unwrap()), "$a");
+    }
+
+    fn choose_event_to_cache(events: &[SyncTimelineEvent]) -> Option<SyncTimelineEvent> {
+        let mut room_info = RoomInfo::new(room_id!("!r:h.uk"), RoomState::Joined);
+        cache_latest_events(&mut room_info, events);
+        room_info.latest_event
+    }
+
+    fn rawev_id(event: SyncTimelineEvent) -> String {
+        event.event_id().unwrap().to_string()
+    }
+
+    fn ev_id(event: Option<SyncTimelineEvent>) -> String {
+        event.unwrap().event_id().unwrap().to_string()
+    }
+
+    fn rawevs_ids(events: &RingBuffer<Raw<AnySyncTimelineEvent>>) -> Vec<String> {
+        events.iter().map(|e| e.get_field("event_id").unwrap().unwrap()).collect()
+    }
+
+    fn evs_ids(events: &[SyncTimelineEvent]) -> Vec<String> {
+        events.iter().map(|e| e.event_id().unwrap().to_string()).collect()
+    }
+
     fn make_event(typ: &str, id: &str) -> SyncTimelineEvent {
         SyncTimelineEvent::new(
             Raw::from_json_string(
@@ -774,6 +989,28 @@ mod test {
                     "type": typ,
                     "event_id": id,
                     "content": { "msgtype": "m.text", "body": "my msg" },
+                    "sender": "@u:h.uk",
+                    "origin_server_ts": 12344445,
+                })
+                .to_string(),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn make_encrypted_event(id: &str) -> SyncTimelineEvent {
+        SyncTimelineEvent::new(
+            Raw::from_json_string(
+                json!({
+                    "type": "m.room.encrypted",
+                    "event_id": id,
+                    "content": {
+                        "algorithm": "m.megolm.v1.aes-sha2",
+                        "ciphertext": "",
+                        "sender_key": "",
+                        "device_id": "",
+                        "session_id": "",
+                    },
                     "sender": "@u:h.uk",
                     "origin_server_ts": 12344445,
                 })

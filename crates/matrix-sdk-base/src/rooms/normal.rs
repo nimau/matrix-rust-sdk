@@ -19,7 +19,7 @@ use std::{
 
 use bitflags::bitflags;
 use futures_util::stream::{self, StreamExt};
-use matrix_sdk_common::deserialized_responses::SyncTimelineEvent;
+use matrix_sdk_common::{deserialized_responses::SyncTimelineEvent, ring_buffer::RingBuffer};
 use ruma::{
     api::client::sync::sync_events::v3::RoomSummary as RumaSummary,
     events::{
@@ -37,10 +37,11 @@ use ruma::{
             tombstone::RoomTombstoneEventContent,
         },
         tag::Tags,
-        AnyRoomAccountDataEvent, AnyStrippedStateEvent, AnySyncStateEvent,
+        AnyRoomAccountDataEvent, AnyStrippedStateEvent, AnySyncStateEvent, AnySyncTimelineEvent,
         RoomAccountDataEventType,
     },
     room::RoomType,
+    serde::Raw,
     EventId, OwnedEventId, OwnedMxcUri, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, RoomAliasId,
     RoomId, RoomVersionId, UserId,
 };
@@ -641,6 +642,12 @@ pub struct RoomInfo {
     encryption_state_synced: bool,
     /// The last event send by sliding sync
     pub latest_event: Option<SyncTimelineEvent>,
+    /// The most recent few encrypted events. When the keys come through to
+    /// decrypt these, the most recent relevant one will replace
+    /// latest_event. (We can't tell which one is relevant until
+    /// they are decrypted.)
+    #[serde(default = "Default::default")]
+    pub latest_encrypted_events: RingBuffer<Raw<AnySyncTimelineEvent>>,
     /// Base room info which holds some basic event contents important for the
     /// room state.
     pub(crate) base_info: BaseRoomInfo,
@@ -682,6 +689,9 @@ fn encryption_state_default() -> bool {
 }
 
 impl RoomInfo {
+    /// The size of the latest_encrypted_events RingBuffer
+    const MAX_ENCRYPTED_EVENTS: usize = 10;
+
     #[doc(hidden)] // used by store tests, otherwise it would be pub(crate)
     pub fn new(room_id: &RoomId, room_state: RoomState) -> Self {
         Self {
@@ -694,6 +704,7 @@ impl RoomInfo {
             sync_info: SyncInfo::NoState,
             encryption_state_synced: false,
             latest_event: None,
+            latest_encrypted_events: RingBuffer::new(RoomInfo::MAX_ENCRYPTED_EVENTS),
             base_info: BaseRoomInfo::new(),
         }
     }
@@ -1032,6 +1043,7 @@ mod test {
             latest_event: Some(
                 Raw::from_json_string(json!({"sender": "@u:i.uk"}).to_string()).unwrap().into(),
             ),
+            latest_encrypted_events: RingBuffer::new(RoomInfo::MAX_ENCRYPTED_EVENTS),
             base_info: BaseRoomInfo::new(),
         };
 
@@ -1052,6 +1064,7 @@ mod test {
             "sync_info": "FullySynced",
             "encryption_state_synced": true,
             "latest_event": {"encryption_info": null, "event": {"sender": "@u:i.uk"}},
+            "latest_encrypted_events": [],
             "base_info": {
                 "avatar": null,
                 "canonical_alias": null,
@@ -1124,6 +1137,7 @@ mod test {
         assert_eq!(info.sync_info, SyncInfo::FullySynced);
         assert!(info.encryption_state_synced);
         assert!(info.latest_event.is_none());
+        assert!(info.latest_encrypted_events.is_empty());
         assert!(info.base_info.avatar.is_none());
         assert!(info.base_info.canonical_alias.is_none());
         assert!(info.base_info.create.is_none());
