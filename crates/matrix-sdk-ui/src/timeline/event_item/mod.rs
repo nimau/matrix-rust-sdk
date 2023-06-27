@@ -65,8 +65,8 @@ pub(super) enum EventTimelineItemKind {
     Remote(RemoteEventTimelineItem),
 }
 
-/// A wrapper that can contain either a transaction id or
-/// an event id in order to identify a specific event.
+/// A wrapper that can contain either a transaction id,
+/// an event id (or both) in order to identify a specific event.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct EventItemIdentifier {
     pub txn_id: Option<OwnedTransactionId>,
