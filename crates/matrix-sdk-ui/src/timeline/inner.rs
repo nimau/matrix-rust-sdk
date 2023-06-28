@@ -734,11 +734,9 @@ impl<P: RoomDataProvider> TimelineInner<P> {
     ) {
         use super::EncryptedMessage;
 
-        trace!("Retrying decryption");
+        let mut state = self.state.lock().await;
 
-        let push_rules_context = self.room_data_provider.push_rules_and_context().await;
-
-        let should_retry = |session_id: &str| {
+        let should_retry = move |session_id: &str| {
             if let Some(session_ids) = &session_ids {
                 session_ids.contains(session_id)
             } else {
@@ -746,82 +744,107 @@ impl<P: RoomDataProvider> TimelineInner<P> {
             }
         };
 
-        let retry_one = |item: Arc<TimelineItem>| {
-            async move {
-                let event_item = item.as_event()?;
+        let retry_indices: Vec<_> = state
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| match item.as_event()?.content().as_unable_to_decrypt()? {
+                EncryptedMessage::MegolmV1AesSha2 { session_id, .. }
+                    if should_retry(session_id) =>
+                {
+                    Some(idx)
+                }
+                EncryptedMessage::MegolmV1AesSha2 { .. }
+                | EncryptedMessage::OlmV1Curve25519AesSha2 { .. }
+                | EncryptedMessage::Unknown => None,
+            })
+            .collect();
 
-                let session_id = match event_item.content().as_unable_to_decrypt()? {
-                    EncryptedMessage::MegolmV1AesSha2 { session_id, .. }
-                        if should_retry(session_id) =>
-                    {
-                        session_id
-                    }
-                    EncryptedMessage::MegolmV1AesSha2 { .. }
-                    | EncryptedMessage::OlmV1Curve25519AesSha2 { .. }
-                    | EncryptedMessage::Unknown => return None,
-                };
+        if retry_indices.is_empty() {
+            return;
+        }
 
-                tracing::Span::current().record("session_id", session_id);
+        debug!("Retrying decryption");
 
-                let Some(remote_event) = event_item.as_remote() else {
-                    error!("Key for unable-to-decrypt timeline item is not an event ID");
-                    return None;
-                };
+        let push_rules_context = self.room_data_provider.push_rules_and_context().await;
 
-                tracing::Span::current().record("event_id", debug(&remote_event.event_id));
+        let do_retry = async move {
+            let retry_one = |item: Arc<TimelineItem>| {
+                async move {
+                    let event_item = item.as_event()?;
 
-                match decryptor.decrypt_event_impl(&remote_event.original_json).await {
-                    Ok(event) => {
-                        trace!("Successfully decrypted event that previously failed to decrypt");
-                        Some(event)
-                    }
-                    Err(e) => {
-                        info!("Failed to decrypt event after receiving room key: {e}");
-                        None
+                    let session_id = match event_item.content().as_unable_to_decrypt()? {
+                        EncryptedMessage::MegolmV1AesSha2 { session_id, .. }
+                            if should_retry(session_id) =>
+                        {
+                            session_id
+                        }
+                        EncryptedMessage::MegolmV1AesSha2 { .. }
+                        | EncryptedMessage::OlmV1Curve25519AesSha2 { .. }
+                        | EncryptedMessage::Unknown => return None,
+                    };
+
+                    tracing::Span::current().record("session_id", session_id);
+
+                    let Some(remote_event) = event_item.as_remote() else {
+                            error!("Key for unable-to-decrypt timeline item is not an event ID");
+                            return None;
+                        };
+
+                    tracing::Span::current().record("event_id", debug(&remote_event.event_id));
+
+                    match decryptor.decrypt_event_impl(&remote_event.original_json).await {
+                        Ok(event) => {
+                            trace!(
+                                "Successfully decrypted event that previously failed to decrypt"
+                            );
+                            Some(event)
+                        }
+                        Err(e) => {
+                            info!("Failed to decrypt event after receiving room key: {e}");
+                            None
+                        }
                     }
                 }
-            }
-            .instrument(info_span!(
-                "retry_one",
-                session_id = field::Empty,
-                event_id = field::Empty
-            ))
-        };
-
-        let mut state = self.state.lock().await;
-
-        // We loop through all the items in the timeline, if we successfully
-        // decrypt a UTD item we either replace it or remove it and update
-        // another one.
-        let mut idx = 0;
-        while let Some(item) = state.items.get(idx) {
-            let Some(mut event) = retry_one(item.clone()).await else {
-                idx += 1;
-                continue;
+                .instrument(info_span!(
+                    "retry_one",
+                    session_id = field::Empty,
+                    event_id = field::Empty
+                ))
             };
 
-            event.push_actions = push_rules_context
-                .as_ref()
-                .map(|(push_rules, push_context)| {
-                    push_rules.get_actions(&event.event, push_context).to_owned()
-                })
-                .unwrap_or_default();
+            // Loop through all the indices, in reverse so removing the UTD doesn't
+            // invalidate other indices (in case decryption succeeds but the
+            // decrypted event is aggregated into another one, like edits are)
+            for idx in retry_indices.into_iter().rev() {
+                let Some(mut event) = retry_one(state.items[idx].clone()).await else {
+                    continue;
+                };
 
-            let result = state
-                .handle_remote_event(
-                    event.into(),
-                    TimelineItemPosition::Update(idx),
-                    &self.room_data_provider,
-                    self.track_read_receipts,
-                )
-                .await;
+                event.push_actions = push_rules_context
+                    .as_ref()
+                    .map(|(push_rules, push_context)| {
+                        push_rules.get_actions(&event.event, push_context).to_owned()
+                    })
+                    .unwrap_or_default();
 
-            // If the UTD was removed rather than updated, run the loop again
-            // with the same index.
-            if !result.item_removed {
-                idx += 1;
+                state
+                    .handle_remote_event(
+                        event.into(),
+                        TimelineItemPosition::Update(idx),
+                        &self.room_data_provider,
+                        self.track_read_receipts,
+                    )
+                    .await;
             }
-        }
+        };
+
+        // For testing it's good to wait for this to finish
+        #[cfg(test)]
+        do_retry.await;
+
+        #[cfg(not(test))]
+        matrix_sdk::executor::spawn(do_retry);
     }
 
     pub(super) async fn set_sender_profiles_pending(&self) {

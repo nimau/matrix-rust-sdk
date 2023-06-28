@@ -47,7 +47,7 @@ impl RoomExt for room::Common {
 }
 
 #[async_trait]
-pub(super) trait RoomDataProvider {
+pub(super) trait RoomDataProvider: Send + Sync {
     fn own_user_id(&self) -> &UserId;
     async fn profile(&self, user_id: &UserId) -> Option<Profile>;
     async fn read_receipts_for_event(&self, event_id: &EventId) -> IndexMap<OwnedUserId, Receipt>;
@@ -115,7 +115,7 @@ impl RoomDataProvider for room::Common {
 // object, which is annoying to create for testing and not really needed
 #[cfg(feature = "e2e-encryption")]
 #[async_trait]
-pub(super) trait Decryptor: Copy {
+pub(super) trait Decryptor: Copy + Send + Sync {
     async fn decrypt_event_impl(&self, raw: &Raw<AnySyncTimelineEvent>) -> Result<TimelineEvent>;
 }
 
