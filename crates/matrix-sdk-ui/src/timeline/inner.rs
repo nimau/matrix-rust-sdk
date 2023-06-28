@@ -1279,7 +1279,7 @@ fn update_timeline_reaction(
             let own_user_id = own_user_id.to_owned();
             reaction_group.0.insert(
                 EventItemIdentifier::EventId(event_id.clone()),
-                // FIXME: need to get the actual timestamp of that event server side.
+                // Note: remote event is not synced yet, so we're adding an item with the local timestamp.
                 ReactionSenderData { id: own_user_id, ts: MilliSecondsSinceUnixEpoch::now() },
             );
         };
