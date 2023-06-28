@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use assert_matches::assert_matches;
 use ruma::{server_name, user_id, EventId, MilliSecondsSinceUnixEpoch, OwnedUserId, UserId};
 
 use crate::timeline::{
@@ -35,7 +36,11 @@ fn by_sender() {
     let alice_reactions = reaction_group.by_sender(&alice).collect::<Vec<_>>();
 
     let reaction = *alice_reactions.get(0).unwrap();
-    assert_eq!(reaction.1.unwrap(), reaction_1.event_id().unwrap());
+
+    assert_matches!(
+        reaction_1,
+        EventItemIdentifier::EventId(event_id) => { assert_eq!(reaction.1.unwrap(), &event_id) }
+    )
 }
 
 #[test]
