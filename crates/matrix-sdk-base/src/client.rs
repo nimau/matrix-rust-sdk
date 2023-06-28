@@ -567,15 +567,64 @@ impl BaseClient {
             // decrypts to-device events, but leaves room events alone.
             // This makes sure that we have the decryption keys for the room
             // events at hand.
-            Ok(o.receive_sync_changes(
-                to_device_events,
-                changed_devices,
-                one_time_keys_counts,
-                unused_fallback_keys,
-            )
-            .await?)
+            let (events, room_key_updates) = o
+                .receive_sync_changes(
+                    to_device_events,
+                    changed_devices,
+                    one_time_keys_counts,
+                    unused_fallback_keys,
+                )
+                .await?;
+
+            for room_key_update in room_key_updates {
+                if let Some(mut room) = self.get_room(&room_key_update.room_id) {
+                    self.decrypt_latest_events(&mut room).await;
+                }
+            }
+
+            Ok(events)
         } else {
+            // If we have no OlmMachine, just return the events that were passed in.
+            // This should not happen unless we forget to set things up by calling
+            // set_session_meta().
             Ok(to_device_events)
+        }
+    }
+
+    /// Decrypt any of this room's latest_encrypted_events
+    /// that we can and if we can, change latest_event to reflect what we
+    /// found, and remove any older encrypted events from
+    /// latest_encrypted_events.
+    #[cfg(feature = "e2e-encryption")]
+    async fn decrypt_latest_events(&self, room: &mut Room) {
+        use ruma::events::AnyMessageLikeEvent;
+
+        let mut found = None;
+        let mut num_skipped = 0;
+
+        // Walk backwards through the encrypted events, looking for one we can decrypt
+        for event in room.latest_encrypted_events().iter().rev() {
+            let res = self.decrypt_sync_room_event(event, room.room_id()).await;
+            if let Ok(Some(decrypted)) = res {
+                // TODO: checking whether it's an m.room.message should share code with
+                // cache_latest_events in sliding_sync.rs
+                if let Ok(AnyMessageLikeEvent::RoomMessage(_)) =
+                    decrypted.event.deserialize_as::<AnyMessageLikeEvent>()
+                {
+                    // We found a message we can decrypt and is the right type!
+                    found = Some(decrypted);
+                    break;
+                }
+            }
+            // TODO: we should probably throw away messages we can decrypt but are not the
+            // right type
+            num_skipped += 1;
+        }
+
+        // If we found one, set it as the latest and delete any older encrypted events
+        if let Some(found) = found {
+            let keep_index = room.latest_encrypted_events().len() - num_skipped;
+            room.latest_event_decrypted(found, keep_index)
         }
     }
 

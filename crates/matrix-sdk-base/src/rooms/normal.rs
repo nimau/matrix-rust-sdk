@@ -356,6 +356,23 @@ impl Room {
         self.inner.read().unwrap().latest_event.clone()
     }
 
+    /// Return the most recent few encrypted events. When the keys come through
+    /// to decrypt these, the most recent relevant one will replace
+    /// latest_event. (We can't tell which one is relevant until
+    /// they are decrypted.)
+    pub fn latest_encrypted_events(&self) -> RingBuffer<Raw<AnySyncTimelineEvent>> {
+        // TODO: clone feels quite painful here
+        self.inner.read().unwrap().latest_encrypted_events.clone()
+    }
+
+    /// Replace our latest_event with the supplied event, and delete it and all
+    /// older encrypted events from latest_encrypted_events, given that the
+    /// new event was at the supplied index in the latest_encrypted_events
+    /// list.
+    pub fn latest_event_decrypted(&mut self, event: SyncTimelineEvent, index: usize) {
+        self.inner.write().unwrap().latest_event_decrypted(event, index);
+    }
+
     /// Get the list of users ids that are considered to be joined members of
     /// this room.
     pub async fn joined_user_ids(&self) -> StoreResult<Vec<OwnedUserId>> {
@@ -896,6 +913,18 @@ impl RoomInfo {
     /// Get the room type of this room.
     pub fn room_type(&self) -> Option<&RoomType> {
         self.base_info.create.as_ref()?.as_original()?.content.room_type.as_ref()
+    }
+
+    /// Replace our latest_event with the supplied event, and delete it and all
+    /// older encrypted events from latest_encrypted_events, given that the
+    /// new event was at the supplied index in the latest_encrypted_events
+    /// list.
+    pub fn latest_event_decrypted(&mut self, latest_event: SyncTimelineEvent, index: usize) {
+        self.latest_event = Some(latest_event);
+        for _ in 0..index {
+            // TODO: do this more efficiently, maybe through a drop_n method on RingBuffer?
+            self.latest_encrypted_events.pop();
+        }
     }
 
     fn creator(&self) -> Option<&UserId> {
