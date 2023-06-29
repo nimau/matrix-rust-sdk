@@ -17,7 +17,7 @@ use imbl::Vector;
 use indexmap::IndexMap;
 use matrix_sdk::SlidingSyncRoom;
 use matrix_sdk_base::deserialized_responses::SyncTimelineEvent;
-use ruma::events::AnyMessageLikeEvent;
+use ruma::events::{AnySyncTimelineEvent, BundledMessageLikeRelations};
 use tracing::{error, instrument, warn};
 
 use super::{
@@ -48,7 +48,7 @@ impl SlidingSyncRoomExt for SlidingSyncRoom {
     /// EventTimelineItem.
     #[instrument(skip_all)]
     fn latest_timeline_item(&self) -> Option<EventTimelineItem> {
-        self.latest_event().and_then(|e| wrap(self, e))
+        self.latest_event().and_then(|e| wrap_latest_event(self, e))
     }
 }
 
@@ -65,23 +65,24 @@ fn sliding_sync_timeline_builder(room: &SlidingSyncRoom) -> Option<TimelineBuild
 
 /// Wrap a low-level event from a sync into a high-level EventTimelineItem,
 /// ready to be used in the message preview in a client.
-fn wrap(room: &SlidingSyncRoom, sync_event: SyncTimelineEvent) -> Option<EventTimelineItem> {
+fn wrap_latest_event(
+    room: &SlidingSyncRoom,
+    sync_event: SyncTimelineEvent,
+) -> Option<EventTimelineItem> {
     let raw_sync_event = sync_event.event;
 
     let encryption_info = sync_event.encryption_info;
 
-    // If the supplied event is not a MessageLikeEvent, return None.
-    // In future, we will want to handle reactions, so will need to do more here.
-    let message_like = raw_sync_event.deserialize_as::<AnyMessageLikeEvent>().ok()?;
+    let event = raw_sync_event.deserialize_as::<AnySyncTimelineEvent>().ok()?;
 
-    let timestamp = message_like.origin_server_ts();
-    let sender = message_like.sender().to_owned();
-    let event_id = message_like.event_id().to_owned();
+    let timestamp = event.origin_server_ts();
+    let sender = event.sender().to_owned();
+    let event_id = event.event_id().to_owned();
     let is_own = room.client().user_id().map(|uid| uid == sender).unwrap_or(false);
 
     // If we don't (yet) know how to handle this type of message, return None here.
     // If we do, convert it into a TimelineItemContent.
-    let item_content = wrap_content(message_like)?;
+    let item_content = wrap_latest_event_content(event)?;
 
     // We don't currently bundle any reactions with the main event. This could
     // conceivably be wanted in the message preview in future.
@@ -121,26 +122,44 @@ fn wrap(room: &SlidingSyncRoom, sync_event: SyncTimelineEvent) -> Option<EventTi
     Some(EventTimelineItem::new(sender, sender_profile, timestamp, item_content, event_kind))
 }
 
-fn wrap_content(message_like: AnyMessageLikeEvent) -> Option<TimelineItemContent> {
-    match message_like {
-        AnyMessageLikeEvent::RoomMessage(ref m) => {
-            let event_content = m.as_original().unwrap().content.clone();
+fn wrap_latest_event_content(event: AnySyncTimelineEvent) -> Option<TimelineItemContent> {
+    match event {
+        AnySyncTimelineEvent::MessageLike(message_like) => match message_like {
+            ruma::events::AnySyncMessageLikeEvent::RoomMessage(message) => {
+                // Grab the content of this event
+                let event_content = message.as_original().unwrap().content.clone();
 
-            // If this message is a reply, we would look up in this list the message it was
-            // replying to. Since we probably won't show this in the message preview,
-            // it's probably OK to supply an empty list here.
-            // Message::from_event marks the original event as Unavailable if it can't be
-            // found inside the timeline_items.
-            let timeline_items = Vector::new();
+                // We don't have access to any relations via the AnySyncTimelineEvent (I think -
+                // andyb) so we pretend there are none. This might be OK for the message preview
+                // use case.
+                let relations = BundledMessageLikeRelations::new();
 
-            Some(TimelineItemContent::Message(Message::from_event(
-                event_content,
-                message_like.relations(),
-                &timeline_items,
-            )))
+                // If this message is a reply, we would look up in this list the message it was
+                // replying to. Since we probably won't show this in the message preview,
+                // it's probably OK to supply an empty list here.
+                // Message::from_event marks the original event as Unavailable if it can't be
+                // found inside the timeline_items.
+                let timeline_items = Vector::new();
+                Some(TimelineItemContent::Message(Message::from_event(
+                    event_content,
+                    relations,
+                    &timeline_items,
+                )))
+            }
+            _ => {
+                warn!(
+                    "Found an event cached as latest_event, but I don't know how \
+                        to wrap it in a TimelineItemContent. type={}, ID={}",
+                    message_like.event_type().to_string(),
+                    message_like.event_id()
+                );
+                None
+            }
+        },
+        AnySyncTimelineEvent::State(_) => {
+            warn!("Found a state event cached as latest_event! ID={}", event.event_id());
+            None
         }
-        // TODO: other types of message need to be represented in message previews too.
-        _ => None,
     }
 }
 
