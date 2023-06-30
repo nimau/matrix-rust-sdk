@@ -599,7 +599,20 @@ impl BaseClient {
     /// latest_encrypted_events.
     #[cfg(feature = "e2e-encryption")]
     async fn decrypt_latest_events(&self, room: &mut Room) {
-        let mut found = None;
+        // Try to find a message we can decrypt and is suitable for using as the latest
+        // event. If we found one, set it as the latest and delete any older
+        // encrypted events
+        if let Some((found, num_skipped)) = self.decrypt_latest_suitable_event(room).await {
+            let keep_index = room.latest_encrypted_events().len() - num_skipped;
+            room.latest_event_decrypted(found, keep_index)
+        }
+    }
+
+    #[cfg(feature = "e2e-encryption")]
+    async fn decrypt_latest_suitable_event(
+        &self,
+        room: &Room,
+    ) -> Option<(SyncTimelineEvent, usize)> {
         let mut num_skipped = 0;
 
         // Walk backwards through the encrypted events, looking for one we can decrypt
@@ -612,21 +625,13 @@ impl BaseClient {
                         is_suitable_for_latest_event(&any_sync_event)
                     {
                         // The event is the right type for us to use as latest_event
-                        found = Some(decrypted);
-                        break;
+                        return Some((decrypted, num_skipped));
                     }
                 }
             }
-            // TODO: we should probably throw away messages we can decrypt but are not the
-            // right type
             num_skipped += 1;
         }
-
-        // If we found one, set it as the latest and delete any older encrypted events
-        if let Some(found) = found {
-            let keep_index = room.latest_encrypted_events().len() - num_skipped;
-            room.latest_event_decrypted(found, keep_index)
-        }
+        None
     }
 
     /// User has joined a room.
