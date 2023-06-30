@@ -21,10 +21,10 @@ use ruma::{
         v3::{self, InvitedRoom, RoomSummary},
         v4::{self, AccountData},
     },
-    events::{AnySyncStateEvent, AnySyncTimelineEvent, TimelineEventType},
+    events::AnySyncStateEvent,
     RoomId,
 };
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use super::BaseClient;
 #[cfg(feature = "e2e-encryption")]
@@ -32,6 +32,7 @@ use crate::RoomMemberships;
 use crate::{
     deserialized_responses::AmbiguityChanges,
     error::Result,
+    latest_event::{is_suitable_for_latest_event, PossibleLatestEvent},
     rooms::RoomState,
     store::{ambiguity_map::AmbiguityCache, StateChanges, Store},
     sync::{JoinedRoom, Rooms, SyncResponse},
@@ -374,20 +375,9 @@ impl BaseClient {
 fn cache_latest_events(room_info: &mut RoomInfo, events: &[SyncTimelineEvent]) {
     let mut encrypted_events = Vec::with_capacity(room_info.latest_encrypted_events.capacity());
     for e in events.iter().rev() {
-        let timeline_event: serde_json::Result<AnySyncTimelineEvent> = e.event.deserialize();
-        if let Ok(timeline_event) = timeline_event {
-            match timeline_event.event_type() {
-                TimelineEventType::RoomEncrypted => {
-                    // m.room.encrypted - this might be the latest event later - we can't tell until
-                    // we are able to decrypt it, so store it for now
-                    //
-                    // Check how many encrypted events we have seen. Only store another if we
-                    // haven't already stored the maximum number.
-                    if encrypted_events.len() < encrypted_events.capacity() {
-                        encrypted_events.push(e.event.clone());
-                    }
-                }
-                TimelineEventType::RoomMessage => {
+        if let Ok(timeline_event) = e.event.deserialize() {
+            match is_suitable_for_latest_event(&timeline_event) {
+                PossibleLatestEvent::YesMessageLike(_) => {
                     // m.room.message - we found one! Store it.
                     room_info.latest_event = Some(e.clone());
                     // We don't need any of the older encrypted events because we have a new
@@ -397,12 +387,25 @@ fn cache_latest_events(room_info: &mut RoomInfo, events: &[SyncTimelineEvent]) {
                     // older.
                     break;
                 }
+                PossibleLatestEvent::NoEncrypted => {
+                    // m.room.encrypted - this might be the latest event later - we can't tell until
+                    // we are able to decrypt it, so store it for now
+                    //
+                    // Check how many encrypted events we have seen. Only store another if we
+                    // haven't already stored the maximum number.
+                    if encrypted_events.len() < encrypted_events.capacity() {
+                        encrypted_events.push(e.event.clone());
+                    }
+                }
                 _ => {
-                    // Ignore other event types
+                    // Ignore unsuitable events
                 }
             }
         } else {
-            timeline_event.unwrap();
+            warn!(
+                "Failed to deserialise event as AnySyncTimelineEvent. ID={}",
+                e.event_id().expect("Event has no ID!")
+            );
         }
     }
 
@@ -448,7 +451,8 @@ mod test {
                 canonical_alias::RoomCanonicalAliasEventContent,
                 member::{MembershipState, RoomMemberEventContent},
             },
-            AnySyncStateEvent, GlobalAccountDataEventContent, StateEventContent,
+            AnySyncStateEvent, AnySyncTimelineEvent, GlobalAccountDataEventContent,
+            StateEventContent,
         },
         mxc_uri, room_alias_id, room_id,
         serde::Raw,

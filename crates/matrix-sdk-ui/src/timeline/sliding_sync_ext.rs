@@ -16,10 +16,13 @@ use async_trait::async_trait;
 use imbl::Vector;
 use indexmap::IndexMap;
 use matrix_sdk::SlidingSyncRoom;
-use matrix_sdk_base::deserialized_responses::SyncTimelineEvent;
+use matrix_sdk_base::{
+    deserialized_responses::SyncTimelineEvent,
+    latest_event::{is_suitable_for_latest_event, PossibleLatestEvent},
+};
 use ruma::events::{
-    AnySyncMessageLikeEvent, AnySyncTimelineEvent, BundledMessageLikeRelations,
-    SyncMessageLikeEvent,
+    room::message::RoomMessageEventContent, AnySyncTimelineEvent, BundledMessageLikeRelations,
+    OriginalSyncMessageLikeEvent,
 };
 use tracing::{error, instrument, warn};
 
@@ -129,50 +132,53 @@ fn wrap_latest_event(
 }
 
 fn wrap_latest_event_content(event: AnySyncTimelineEvent) -> Option<TimelineItemContent> {
-    match event {
-        AnySyncTimelineEvent::MessageLike(message_like) => {
-            let AnySyncMessageLikeEvent::RoomMessage(message) = message_like else {
-                // TODO: When we support reactions in message previews, this will need to change
-                warn!(
-                    "Found an event cached as latest_event, but I don't know how \
-                        to wrap it in a TimelineItemContent. type={}, ID={}",
-                    message_like.event_type().to_string(),
-                    message_like.event_id()
-                );
-                return None;
-            };
-
-            let SyncMessageLikeEvent::Original(message) = message else {
-                warn!("Found a redacted event cached as latest_event! ID={}", message.event_id());
-                return None;
-            };
-
-            // Grab the content of this event
-            let event_content = message.content.clone();
-
-            // We don't have access to any relations via the AnySyncTimelineEvent (I think -
-            // andyb) so we pretend there are none. This might be OK for the message preview
-            // use case.
-            let relations = BundledMessageLikeRelations::new();
-
-            // If this message is a reply, we would look up in this list the message it was
-            // replying to. Since we probably won't show this in the message preview,
-            // it's probably OK to supply an empty list here.
-            // Message::from_event marks the original event as Unavailable if it can't be
-            // found inside the timeline_items.
-            let timeline_items = Vector::new();
-            Some(TimelineItemContent::Message(Message::from_event(
-                event_content,
-                relations,
-                &timeline_items,
-            )))
-        }
-        AnySyncTimelineEvent::State(_) => {
+    match is_suitable_for_latest_event(&event) {
+        PossibleLatestEvent::YesMessageLike(m) => wrap_suitable_latest_event_content(m),
+        PossibleLatestEvent::NoUnsupportedEventType => {
             // TODO: when we support state events in message previews, this will need change
             warn!("Found a state event cached as latest_event! ID={}", event.event_id());
             None
         }
+        PossibleLatestEvent::NoUnsupportedMessageLikeType => {
+            // TODO: When we support reactions in message previews, this will need to change
+            warn!(
+                "Found an event cached as latest_event, but I don't know how \
+                        to wrap it in a TimelineItemContent. type={}, ID={}",
+                event.event_type().to_string(),
+                event.event_id()
+            );
+            None
+        }
+        PossibleLatestEvent::NoEncrypted => todo!(),
+        PossibleLatestEvent::NoRedacted => {
+            warn!("Found a redacted event cached as latest_event! ID={}", event.event_id());
+            None
+        }
     }
+}
+
+fn wrap_suitable_latest_event_content(
+    message: &OriginalSyncMessageLikeEvent<RoomMessageEventContent>,
+) -> Option<TimelineItemContent> {
+    // Grab the content of this event
+    let event_content = message.content.clone();
+
+    // We don't have access to any relations via the AnySyncTimelineEvent (I think -
+    // andyb) so we pretend there are none. This might be OK for the message preview
+    // use case.
+    let relations = BundledMessageLikeRelations::new();
+
+    // If this message is a reply, we would look up in this list the message it was
+    // replying to. Since we probably won't show this in the message preview,
+    // it's probably OK to supply an empty list here.
+    // Message::from_event marks the original event as Unavailable if it can't be
+    // found inside the timeline_items.
+    let timeline_items = Vector::new();
+    Some(TimelineItemContent::Message(Message::from_event(
+        event_content,
+        relations,
+        &timeline_items,
+    )))
 }
 
 #[cfg(test)]

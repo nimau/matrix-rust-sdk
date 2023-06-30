@@ -56,6 +56,8 @@ use tokio::sync::RwLock;
 use tokio::sync::RwLockReadGuard;
 use tracing::{debug, info, instrument, trace, warn};
 
+#[cfg(feature = "e2e-encryption")]
+use crate::latest_event::{is_suitable_for_latest_event, PossibleLatestEvent};
 use crate::{
     deserialized_responses::{AmbiguityChanges, MembersResponse, SyncTimelineEvent},
     error::Result,
@@ -597,23 +599,22 @@ impl BaseClient {
     /// latest_encrypted_events.
     #[cfg(feature = "e2e-encryption")]
     async fn decrypt_latest_events(&self, room: &mut Room) {
-        use ruma::events::AnyMessageLikeEvent;
-
         let mut found = None;
         let mut num_skipped = 0;
 
         // Walk backwards through the encrypted events, looking for one we can decrypt
         for event in room.latest_encrypted_events().iter().rev() {
-            let res = self.decrypt_sync_room_event(event, room.room_id()).await;
-            if let Ok(Some(decrypted)) = res {
-                // TODO: checking whether it's an m.room.message should share code with
-                // cache_latest_events in sliding_sync.rs
-                if let Ok(AnyMessageLikeEvent::RoomMessage(_)) =
-                    decrypted.event.deserialize_as::<AnyMessageLikeEvent>()
-                {
-                    // We found a message we can decrypt and is the right type!
-                    found = Some(decrypted);
-                    break;
+            if let Ok(Some(decrypted)) = self.decrypt_sync_room_event(event, room.room_id()).await {
+                // We found an event we can decrypt
+                if let Ok(any_sync_event) = decrypted.event.deserialize() {
+                    // We can deserialize it to find its type
+                    if let PossibleLatestEvent::YesMessageLike(_) =
+                        is_suitable_for_latest_event(&any_sync_event)
+                    {
+                        // The event is the right type for us to use as latest_event
+                        found = Some(decrypted);
+                        break;
+                    }
                 }
             }
             // TODO: we should probably throw away messages we can decrypt but are not the
