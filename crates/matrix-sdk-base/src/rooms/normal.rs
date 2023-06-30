@@ -921,7 +921,7 @@ impl RoomInfo {
     /// list.
     pub fn latest_event_decrypted(&mut self, latest_event: SyncTimelineEvent, index: usize) {
         self.latest_event = Some(latest_event);
-        for _ in 0..index {
+        for _ in 0..(index + 1) {
             // TODO: do this more efficiently, maybe through a drop_n method on RingBuffer?
             self.latest_encrypted_events.pop();
         }
@@ -1435,5 +1435,78 @@ mod test {
                 .unwrap(),
             "new name"
         );
+    }
+
+    #[test]
+    fn when_we_provide_a_newly_decrypted_event_it_replaces_latest_event() {
+        // Given a room
+        let (_store, mut room) = make_room(RoomState::Joined);
+        // Sanity: it has no latest_event
+        assert!(room.latest_event().is_none());
+
+        // When I provide a latest event
+        let event = make_event("$A");
+        room.latest_event_decrypted(event.clone(), 0);
+
+        // Then is it stored
+        assert_eq!(room.latest_event().unwrap().event_id(), event.event_id());
+    }
+
+    #[test]
+    fn when_a_newly_decrypted_event_appears_we_delete_all_older_encrypted_events() {
+        // Given a room with some encrypted events and a latest event
+        let (_store, mut room) = make_room(RoomState::Joined);
+        room.inner.write().unwrap().latest_event = Some(make_event("$A"));
+        add_encrypted_event(&room, "$0");
+        add_encrypted_event(&room, "$1");
+        add_encrypted_event(&room, "$2");
+        add_encrypted_event(&room, "$3");
+
+        // When I provide a latest event
+        let new_event = make_event("$1");
+        let new_event_index = 1;
+        room.latest_event_decrypted(new_event.clone(), new_event_index);
+
+        // Then the encrypted events list is shortened to only newer events
+        let enc_evs = room.latest_encrypted_events();
+        assert_eq!(enc_evs.len(), 2);
+        assert_eq!(enc_evs.get(0).unwrap().get_field::<&str>("event_id").unwrap().unwrap(), "$2");
+        assert_eq!(enc_evs.get(1).unwrap().get_field::<&str>("event_id").unwrap().unwrap(), "$3");
+
+        // And the event is stored
+        assert_eq!(room.latest_event().unwrap().event_id(), new_event.event_id());
+    }
+
+    #[test]
+    fn replacing_the_newest_event_leaves_none_left() {
+        // Given a room with some encrypted events
+        let (_store, mut room) = make_room(RoomState::Joined);
+        add_encrypted_event(&room, "$0");
+        add_encrypted_event(&room, "$1");
+        add_encrypted_event(&room, "$2");
+        add_encrypted_event(&room, "$3");
+
+        // When I provide a latest event and say it was the very latest
+        let new_event = make_event("$3");
+        let new_event_index = 3;
+        room.latest_event_decrypted(new_event.clone(), new_event_index);
+
+        // Then the encrypted events list ie empty
+        let enc_evs = room.latest_encrypted_events();
+        assert_eq!(enc_evs.len(), 0);
+    }
+
+    fn add_encrypted_event(room: &Room, event_id: &str) {
+        room.inner
+            .write()
+            .unwrap()
+            .latest_encrypted_events
+            .push(Raw::from_json_string(json!({ "event_id": event_id }).to_string()).unwrap());
+    }
+
+    fn make_event(event_id: &str) -> SyncTimelineEvent {
+        SyncTimelineEvent::new(
+            Raw::from_json_string(json!({ "event_id": event_id }).to_string()).unwrap(),
+        )
     }
 }

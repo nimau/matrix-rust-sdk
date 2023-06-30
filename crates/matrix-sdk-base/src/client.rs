@@ -602,21 +602,26 @@ impl BaseClient {
         // Try to find a message we can decrypt and is suitable for using as the latest
         // event. If we found one, set it as the latest and delete any older
         // encrypted events
-        if let Some((found, num_skipped)) = self.decrypt_latest_suitable_event(room).await {
-            let keep_index = room.latest_encrypted_events().len() - num_skipped;
-            room.latest_event_decrypted(found, keep_index)
+        if let Some((found, found_index)) = self.decrypt_latest_suitable_event(room).await {
+            room.latest_event_decrypted(found, found_index)
         }
     }
 
+    /// Attempt to decrypt a latest event, trying the latest stored encrypted
+    /// one first, and walking backwards, stopping when we find an event
+    /// that we can decrypt, and that is suitable to be the latest event
+    /// (i.e. we can usefully display it as a message preview). Returns the
+    /// decrypted event if we found one, along with its index in the
+    /// latest_encrypted_events list, or None if we didn't find one.
     #[cfg(feature = "e2e-encryption")]
     async fn decrypt_latest_suitable_event(
         &self,
         room: &Room,
     ) -> Option<(SyncTimelineEvent, usize)> {
-        let mut num_skipped = 0;
+        let enc_events = room.latest_encrypted_events();
 
         // Walk backwards through the encrypted events, looking for one we can decrypt
-        for event in room.latest_encrypted_events().iter().rev() {
+        for (i, event) in enc_events.iter().enumerate().rev() {
             if let Ok(Some(decrypted)) = self.decrypt_sync_room_event(event, room.room_id()).await {
                 // We found an event we can decrypt
                 if let Ok(any_sync_event) = decrypted.event.deserialize() {
@@ -625,11 +630,10 @@ impl BaseClient {
                         is_suitable_for_latest_event(&any_sync_event)
                     {
                         // The event is the right type for us to use as latest_event
-                        return Some((decrypted, num_skipped));
+                        return Some((decrypted, i));
                     }
                 }
             }
-            num_skipped += 1;
         }
         None
     }
@@ -1280,31 +1284,24 @@ impl Default for BaseClient {
 #[cfg(test)]
 mod tests {
     use matrix_sdk_test::{
-        async_test, response_from_file, EventBuilder, InvitedRoomBuilder, LeftRoomBuilder,
-        StrippedStateTestEvent, TimelineTestEvent,
+        async_test, response_from_file, EventBuilder, InvitedRoomBuilder, JoinedRoomBuilder,
+        LeftRoomBuilder, StrippedStateTestEvent, TimelineTestEvent,
     };
     use ruma::{
         api::{client as api, IncomingResponse},
-        room_id, user_id,
+        room_id, user_id, RoomId, UserId,
     };
     use serde_json::json;
 
     use super::BaseClient;
-    use crate::{DisplayName, RoomState, SessionMeta};
+    use crate::{DisplayName, Room, RoomState, SessionMeta};
 
     #[async_test]
     async fn invite_after_leaving() {
         let user_id = user_id!("@alice:example.org");
         let room_id = room_id!("!test:example.org");
 
-        let client = BaseClient::new();
-        client
-            .set_session_meta(SessionMeta {
-                user_id: user_id.to_owned(),
-                device_id: "FOOBAR".into(),
-            })
-            .await
-            .unwrap();
+        let client = logged_in_client(user_id).await;
 
         let mut ev_builder = EventBuilder::new();
 
@@ -1350,14 +1347,7 @@ mod tests {
         let user_id = user_id!("@alice:example.org");
         let room_id = room_id!("!ithpyNKDtmhneaTQja:example.org");
 
-        let client = BaseClient::new();
-        client
-            .set_session_meta(SessionMeta {
-                user_id: user_id.to_owned(),
-                device_id: "FOOBAR".into(),
-            })
-            .await
-            .unwrap();
+        let client = logged_in_client(user_id).await;
 
         let response = api::sync::sync_events::v3::Response::try_from_http_response(response_from_file(&json!({
             "next_batch": "asdkl;fjasdkl;fj;asdkl;f",
@@ -1438,5 +1428,71 @@ mod tests {
             room.display_name().await.expect("fetching display name failed"),
             DisplayName::Calculated("Kyra".to_owned())
         );
+    }
+
+    #[cfg(feature = "e2e-encryption")]
+    #[async_test]
+    async fn when_there_are_no_latest_encrypted_events_decrypting_them_does_nothing() {
+        // Given a room
+        let user_id = user_id!("@u:u.to");
+        let room_id = room_id!("!r:u.to");
+        let client = logged_in_client(user_id).await;
+        let mut room = process_room_join(&client, room_id, "$1", user_id).await;
+
+        // Sanity: it has no latest_encrypted_events or latest_event
+        assert!(room.latest_encrypted_events().is_empty());
+        assert!(room.latest_event().is_none());
+
+        // When I tell it to do some decryption
+        client.decrypt_latest_events(&mut room).await;
+
+        // Then nothing changed
+        assert!(room.latest_encrypted_events().is_empty());
+        assert!(room.latest_event().is_none());
+    }
+
+    // TODO: I wanted to write more tests here for decrypt_latest_events but I got
+    // lost trying to set up my OlmMachine to be able to encrypt and decrypt
+    // events. In the meantime, there are tests for the most difficult logic
+    // inside Room.  --andyb
+
+    async fn logged_in_client(user_id: &UserId) -> BaseClient {
+        let client = BaseClient::new();
+        client
+            .set_session_meta(SessionMeta {
+                user_id: user_id.to_owned(),
+                device_id: "FOOBAR".into(),
+            })
+            .await
+            .expect("set_session_meta failed!");
+        client
+    }
+
+    #[cfg(feature = "e2e-encryption")]
+    async fn process_room_join(
+        client: &BaseClient,
+        room_id: &RoomId,
+        event_id: &str,
+        user_id: &UserId,
+    ) -> Room {
+        let mut ev_builder = EventBuilder::new();
+        let response = ev_builder
+            .add_joined_room(JoinedRoomBuilder::new(room_id).add_timeline_event(
+                TimelineTestEvent::Custom(json!({
+                    "content": {
+                        "displayname": "Alice",
+                        "membership": "join",
+                    },
+                    "event_id": event_id,
+                    "origin_server_ts": 1432135524678u64,
+                    "sender": user_id,
+                    "state_key": user_id,
+                    "type": "m.room.member",
+                })),
+            ))
+            .build_sync_response();
+        client.receive_sync_response(response).await.unwrap();
+
+        client.get_room(room_id).expect("Just-created room not found!")
     }
 }
