@@ -368,8 +368,8 @@ impl Room {
     /// older encrypted events from latest_encrypted_events, given that the
     /// new event was at the supplied index in the latest_encrypted_events
     /// list.
-    pub fn latest_event_decrypted(&mut self, event: SyncTimelineEvent, index: usize) {
-        self.inner.write().unwrap().latest_event_decrypted(event, index);
+    pub fn on_latest_event_decrypted(&mut self, event: SyncTimelineEvent, index: usize) {
+        self.inner.write().unwrap().on_latest_event_decrypted(event, index);
     }
 
     /// Get the list of users ids that are considered to be joined members of
@@ -918,7 +918,7 @@ impl RoomInfo {
     /// older encrypted events from latest_encrypted_events, given that the
     /// new event was at the supplied index in the latest_encrypted_events
     /// list.
-    pub fn latest_event_decrypted(&mut self, latest_event: SyncTimelineEvent, index: usize) {
+    pub fn on_latest_event_decrypted(&mut self, latest_event: SyncTimelineEvent, index: usize) {
         self.latest_event = Some(latest_event);
         for _ in 0..(index + 1) {
             // TODO: do this more efficiently, maybe through a drop_n method on RingBuffer?
@@ -1445,7 +1445,7 @@ mod test {
 
         // When I provide a latest event
         let event = make_event("$A");
-        room.latest_event_decrypted(event.clone(), 0);
+        room.on_latest_event_decrypted(event.clone(), 0);
 
         // Then is it stored
         assert_eq!(room.latest_event().unwrap().event_id(), event.event_id());
@@ -1464,7 +1464,7 @@ mod test {
         // When I provide a latest event
         let new_event = make_event("$1");
         let new_event_index = 1;
-        room.latest_event_decrypted(new_event.clone(), new_event_index);
+        room.on_latest_event_decrypted(new_event.clone(), new_event_index);
 
         // Then the encrypted events list is shortened to only newer events
         let enc_evs = room.latest_encrypted_events();
@@ -1488,7 +1488,7 @@ mod test {
         // When I provide a latest event and say it was the very latest
         let new_event = make_event("$3");
         let new_event_index = 3;
-        room.latest_event_decrypted(new_event.clone(), new_event_index);
+        room.on_latest_event_decrypted(new_event.clone(), new_event_index);
 
         // Then the encrypted events list ie empty
         let enc_evs = room.latest_encrypted_events();
