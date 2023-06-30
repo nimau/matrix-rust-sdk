@@ -56,3 +56,138 @@ pub fn is_suitable_for_latest_event(event: &AnySyncTimelineEvent) -> PossibleLat
         AnySyncTimelineEvent::State(_) => PossibleLatestEvent::NoUnsupportedEventType,
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::collections::BTreeMap;
+
+    use assert_matches::assert_matches;
+    use ruma::{
+        events::{
+            room::{
+                encrypted::{
+                    EncryptedEventScheme, OlmV1Curve25519AesSha2Content, RoomEncryptedEventContent,
+                    SyncRoomEncryptedEvent,
+                },
+                message::{
+                    ImageMessageEventContent, MessageType, RoomMessageEventContent,
+                    SyncRoomMessageEvent,
+                },
+                topic::{RoomTopicEventContent, SyncRoomTopicEvent},
+                ImageInfo, MediaSource,
+            },
+            sticker::{StickerEventContent, SyncStickerEvent},
+            AnySyncMessageLikeEvent, AnySyncStateEvent, AnySyncTimelineEvent, EmptyStateKey,
+            MessageLikeUnsigned, OriginalSyncMessageLikeEvent, OriginalSyncStateEvent,
+            StateUnsigned,
+        },
+        owned_event_id, owned_mxc_uri, owned_user_id, MilliSecondsSinceUnixEpoch, UInt,
+    };
+
+    use crate::latest_event::{is_suitable_for_latest_event, PossibleLatestEvent};
+
+    #[test]
+    fn room_messages_are_suitable() {
+        let event = AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
+            SyncRoomMessageEvent::Original(OriginalSyncMessageLikeEvent {
+                content: RoomMessageEventContent::new(MessageType::Image(
+                    ImageMessageEventContent::new(
+                        "".to_owned(),
+                        MediaSource::Plain(owned_mxc_uri!("mxc://example.com/1")),
+                    ),
+                )),
+                event_id: owned_event_id!("$1"),
+                sender: owned_user_id!("@a:b.c"),
+                origin_server_ts: MilliSecondsSinceUnixEpoch(UInt::new(2123).unwrap()),
+                unsigned: MessageLikeUnsigned::new(),
+            }),
+        ));
+        let m = assert_matches::assert_matches!(
+            is_suitable_for_latest_event(&event),
+            PossibleLatestEvent::YesMessageLike(m) => m
+        );
+
+        assert_eq!(m.content.msgtype.msgtype(), "m.image");
+    }
+
+    #[test]
+    fn different_types_of_messagelike_are_unsuitable() {
+        let event = AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::Sticker(
+            SyncStickerEvent::Original(OriginalSyncMessageLikeEvent {
+                content: StickerEventContent::new(
+                    "sticker!".to_owned(),
+                    ImageInfo::new(),
+                    owned_mxc_uri!("mxc://example.com/1"),
+                ),
+                event_id: owned_event_id!("$1"),
+                sender: owned_user_id!("@a:b.c"),
+                origin_server_ts: MilliSecondsSinceUnixEpoch(UInt::new(2123).unwrap()),
+                unsigned: MessageLikeUnsigned::new(),
+            }),
+        ));
+
+        assert_matches!(
+            is_suitable_for_latest_event(&event),
+            PossibleLatestEvent::NoUnsupportedMessageLikeType
+        );
+    }
+
+    // TODO: I can't write this test because I can't construct a UnsignedRoomRedactionEvent.
+    //       I asked a question in the Ruma room.
+    //#[test]
+    //fn redacted_messages_are_unsuitable() {
+    //    let event = AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
+    //        SyncRoomMessageEvent::Redacted(RedactedSyncMessageLikeEvent {
+    //            content: RedactedRoomMessageEventContent::new(),
+    //            event_id: owned_event_id!("$1"),
+    //            sender: owned_user_id!("@a:b.c"),
+    //            origin_server_ts: MilliSecondsSinceUnixEpoch(UInt::new(2123).unwrap()),
+    //            unsigned: RedactedUnsigned::new(UnsignedRoomRedactionEvent::new()),
+    //        }),
+    //    ));
+
+    //    assert_matches!(
+    //        is_suitable_for_latest_event(&event),
+    //        PossibleLatestEvent::NoUnsupportedMessageLikeType
+    //    );
+    //}
+
+    #[test]
+    fn encrypted_messages_are_unsuitable() {
+        let event = AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomEncrypted(
+            SyncRoomEncryptedEvent::Original(OriginalSyncMessageLikeEvent {
+                content: RoomEncryptedEventContent::new(
+                    EncryptedEventScheme::OlmV1Curve25519AesSha2(
+                        OlmV1Curve25519AesSha2Content::new(BTreeMap::new(), "".to_owned()),
+                    ),
+                    None,
+                ),
+                event_id: owned_event_id!("$1"),
+                sender: owned_user_id!("@a:b.c"),
+                origin_server_ts: MilliSecondsSinceUnixEpoch(UInt::new(2123).unwrap()),
+                unsigned: MessageLikeUnsigned::new(),
+            }),
+        ));
+
+        assert_matches!(is_suitable_for_latest_event(&event), PossibleLatestEvent::NoEncrypted);
+    }
+
+    #[test]
+    fn state_events_are_unsuitable() {
+        let event = AnySyncTimelineEvent::State(AnySyncStateEvent::RoomTopic(
+            SyncRoomTopicEvent::Original(OriginalSyncStateEvent {
+                content: RoomTopicEventContent::new("".to_string()),
+                event_id: owned_event_id!("$1"),
+                sender: owned_user_id!("@a:b.c"),
+                origin_server_ts: MilliSecondsSinceUnixEpoch(UInt::new(2123).unwrap()),
+                unsigned: StateUnsigned::new(),
+                state_key: EmptyStateKey,
+            }),
+        ));
+
+        assert_matches!(
+            is_suitable_for_latest_event(&event),
+            PossibleLatestEvent::NoUnsupportedEventType
+        );
+    }
+}
