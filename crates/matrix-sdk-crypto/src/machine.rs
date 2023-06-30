@@ -1131,7 +1131,7 @@ impl OlmMachine {
         let changed_sessions =
             self.inner.key_request_machine.collect_incoming_key_requests().await?;
 
-        changes.sessions.extend(changed_sessions.clone());
+        changes.sessions.extend(changed_sessions);
 
         self.store().save_changes(changes).await?;
 
