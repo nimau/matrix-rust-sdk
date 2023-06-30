@@ -360,9 +360,8 @@ impl Room {
     /// to decrypt these, the most recent relevant one will replace
     /// latest_event. (We can't tell which one is relevant until
     /// they are decrypted.)
-    pub fn latest_encrypted_events(&self) -> RingBuffer<Raw<AnySyncTimelineEvent>> {
-        // TODO: clone feels quite painful here
-        self.inner.read().unwrap().latest_encrypted_events.clone()
+    pub fn latest_encrypted_events(&self) -> Vec<Raw<AnySyncTimelineEvent>> {
+        self.inner.read().unwrap().latest_encrypted_events.iter().cloned().collect()
     }
 
     /// Replace our latest_event with the supplied event, and delete it and all
